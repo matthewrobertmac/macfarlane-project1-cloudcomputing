@@ -13,7 +13,7 @@
 A serverless, distributed ad selection pipeline processing live auction streams at scale using AWS Lambda, SQS, and DynamoDB. This project demonstrates real-world distributed systems principles for processing ad auctions in under 100ms.
 
 ## Portfolio Features
-**Live URL**: https://score-and-select.preview.emergentagent.com
+**Live URL**: https://adflow-pipeline.preview.emergentagent.com
 
 ### Tabs Implemented
 1. **Live Testing** - Interactive test profiles (warmup, steady, burst, soak) with real-time analytics
