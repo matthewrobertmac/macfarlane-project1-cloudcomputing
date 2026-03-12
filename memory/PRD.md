@@ -16,16 +16,19 @@ A serverless, distributed ad selection pipeline processing live auction streams 
 **Live URL**: https://adflow-pipeline.preview.emergentagent.com
 
 ### Tabs Implemented
-1. **Live Testing** - Interactive test profiles (warmup, steady, burst, soak) with real-time analytics
+1. **Live Testing** - Interactive test profiles (warmup, steady, burst, soak) with real-time analytics + latency breakdown visualization
 2. **Architecture** - Professor's template vs optimized implementation comparison
 3. **Optimizations** - Performance improvements with cost analysis (FREE/SAVES $/NEUTRAL)
-4. **Course** - Course syllabus info, topics, weekly schedule
-5. **About Me** - Education, certifications, projects, contact info
+4. **Terraform** - Infrastructure as Code deployment with copyable code blocks
+5. **Course** - Course syllabus info, topics, weekly schedule
+6. **About Me** - Education, certifications, projects, contact info
 
 ### Key Features
 - **Warm Up AWS Button** - Pre-provisions Lambda containers for burst testing
 - **Live Latency Charts** - Real-time visualization using Recharts
 - **Latency Distribution Pie Chart** - <500ms / 500-1000ms / >1000ms breakdown
+- **Latency Breakdown by AWS Service** - Stacked bar + individual cards showing SQS Accept, Queue Wait, Lambda Trigger, Lambda Compute, Lambda I/O, SQS Delivery
+- **Bottleneck Analysis** - Identifies primary bottleneck, concurrency status, throughput, recommendations
 - **Statistics Dashboard** - Min, Avg, Median, p95, Max, Throughput
 - **Professor's Test Profiles** - Matches test-apparatus/index.html exactly
 
@@ -48,65 +51,33 @@ A serverless, distributed ad selection pipeline processing live auction streams 
 | Lambda Memory | 256MB | 512MB | 2x CPU | NEUTRAL |
 | SQS Batch | send_message() | send_message_batch() | 90% fewer calls | SAVES $ |
 
-## Performance Results
-| Metric | Before | After | Improvement |
-|--------|--------|-------|-------------|
-| Lambda Batch Time | 600ms | 15ms | 97% faster |
-| Cold Start | ~500ms | ~200ms | 60% faster |
-| Warmup <500ms | 0% | 60% | +60 points |
-
-## Resume Information Displayed
-### Education
-- New College of Florida - M.S. Data Science (In Progress) - 2025-2026
-- Flatiron School - Full Stack Web Development - 2023
-- The Catholic University of America - B.A. Political Science - 2020
-- United States Military Academy - West Point - 2012-2015
-
-### Certifications
-- AWS Solutions Architect Associate
-- AWS Machine Learning Specialty
-- Certified Kubernetes Administrator
-- GCP Professional Cloud Architect
-- GCP Professional Data Engineer
-- GCP Professional DevOps Engineer
-- Lean Six Sigma Green Belt
-
-### Projects Featured
-- MaterMemoriae - Language learning with GPT-4, Whisper, TensorFlow.js
-- Voice-to-Vision - AI art generation from song lyrics
-- Inference Mesh - TensorFlow Lite object detection
-- LitCrypts - Cryptographic puzzle game
-
-## Course Information Displayed
-- **Course**: IDC5131 - Distributed Systems for Data Science
-- **Topics**: AWS, Git, Spark, Databricks, Snowflake, Kafka, dbt, Airflow
-- **Schedule**: Tue/Thu 9:00-10:20 AM, Library 209
-- **Instructor**: Prof. Gil Salu
-- **Institution**: New College of Florida
-
 ## Files Structure
 ```
-/app/frontend/src/App.js     # React portfolio with 6 tabs, charts, testing UI
-/app/backend/server.py       # FastAPI with /api/warmup and /api/test endpoints
+/app/frontend/src/App.js     # React portfolio with 6 tabs, charts, testing UI, latency breakdown
+/app/backend/server.py       # FastAPI with /api/warmup, /api/test (with latency breakdown), /api/heartbeat, /api/pc-status
 
 /app/DistributedForDataScienceF26/project1/student-starter/
 ├── worker/lambda_handler.py  # Optimized Lambda code
 ├── template.yaml             # SAM template (512MB, BatchSize 10)
 ├── terraform/                # Alternative Terraform deployment
-│   ├── main.tf              # Complete infrastructure
-│   ├── terraform.tfvars     # Variable values
-│   └── README.md            # Terraform usage guide
-├── analysis/analysis.ipynb   # Analyst report
 └── performance_test.py       # CLI testing script
 ```
 
-## Test Results
-- All 8 pytest tests passing
-- Backend: 95% (minor timeout on soak test)
-- Frontend: 100%
-- Integration: 100%
+## Completed Features (as of Feb 2026)
+- [x] Core Ad-Bidding Lambda Logic
+- [x] Performance Optimization (parallel I/O, batch writes, orjson, ARM64)
+- [x] Portfolio Frontend (6 tabs, interactive testing, charts)
+- [x] Backend API (FastAPI with test/warmup/heartbeat/PC endpoints)
+- [x] Provisioned Concurrency Auto-Scaling (code-complete, blocked by AWS quota)
+- [x] Terraform IaC tab
+- [x] **Latency Breakdown Visualization** (stacked bar + bottleneck analysis)
+
+## Blocked / Pending
+- **P1**: Provisioned Concurrency deployment - blocked on AWS quota increase (requested 3000)
+  - Once approved: redeploy SAM stack with PC enabled, test auto-scaling
+- **P2**: Re-run burst tests with PC enabled to document improved performance
 
 ## Next Steps
-1. Push to GitHub on `macfarlane` branch
-2. Take test apparatus screenshot for submission
-3. After grading: `sam delete --stack-name adflow-macfarlane`
+1. Await AWS quota approval for Provisioned Concurrency
+2. Push to GitHub on `macfarlane` branch
+3. Take test apparatus screenshot for submission
