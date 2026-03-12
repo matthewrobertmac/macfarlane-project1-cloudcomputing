@@ -497,6 +497,13 @@ async def clear_test_history():
     result = await db.test_history.delete_many({})
     return {"deleted": result.deleted_count}
 
+@api_router.patch("/test-history/{entry_id}/annotate")
+async def annotate_history_entry(entry_id: str, body: dict):
+    """Add or update annotation on a test history entry."""
+    annotation = body.get("annotation", "")
+    await db.test_history.update_one({"id": entry_id}, {"$set": {"annotation": annotation}})
+    return {"updated": True}
+
 
 # ============================================================================
 # AUTO-SCALING PROVISIONED CONCURRENCY
