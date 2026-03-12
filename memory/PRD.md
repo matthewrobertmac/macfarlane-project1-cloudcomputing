@@ -86,12 +86,16 @@ A serverless, distributed ad selection pipeline processing live auction streams 
 
 ## Files Structure
 ```
-/app/frontend/src/App.js     # React portfolio with 5 tabs, charts, testing UI
+/app/frontend/src/App.js     # React portfolio with 6 tabs, charts, testing UI
 /app/backend/server.py       # FastAPI with /api/warmup and /api/test endpoints
 
 /app/DistributedForDataScienceF26/project1/student-starter/
 ├── worker/lambda_handler.py  # Optimized Lambda code
 ├── template.yaml             # SAM template (512MB, BatchSize 10)
+├── terraform/                # Alternative Terraform deployment
+│   ├── main.tf              # Complete infrastructure
+│   ├── terraform.tfvars     # Variable values
+│   └── README.md            # Terraform usage guide
 ├── analysis/analysis.ipynb   # Analyst report
 └── performance_test.py       # CLI testing script
 ```

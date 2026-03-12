@@ -5,7 +5,7 @@ import {
   BarChart3, Code2, GraduationCap, MapPin, Calendar, BookOpen, Award,
   Play, Square, RefreshCw, Flame, Activity, Clock, TrendingUp, 
   CheckCircle2, AlertCircle, Cpu, FileText, User, Briefcase, Globe,
-  ChevronDown, ChevronUp, Target, Layers, Settings
+  ChevronDown, ChevronUp, Target, Layers, Settings, Copy, Check, Terminal
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, Legend, AreaChart, Area } from 'recharts';
 
@@ -19,7 +19,15 @@ function App() {
   const [liveMetrics, setLiveMetrics] = useState([]);
   const [isWarmedUp, setIsWarmedUp] = useState(false);
   const [expandedSection, setExpandedSection] = useState(null);
+  const [copiedCode, setCopiedCode] = useState(null);
   const testRef = useRef(null);
+
+  // Copy to clipboard function
+  const copyToClipboard = (text, id) => {
+    navigator.clipboard.writeText(text);
+    setCopiedCode(id);
+    setTimeout(() => setCopiedCode(null), 2000);
+  };
 
   // Test profiles matching professor's test apparatus
   const profiles = {
@@ -28,6 +36,196 @@ function App() {
     burst: { count: 500, delay: 0, description: "500 msgs, all at once - Stress test (requires warm-up)" },
     soak: { count: 200, delay: 1000, description: "200 msgs, 1s delay - Sustained traffic test" },
   };
+
+  // Terraform code strings for copy functionality
+  const terraformMain = `# AdFlow Ad Selection Pipeline - Terraform Configuration
+# Author: Matthew R. MacFarlane
+# Course: IDC5131 Distributed Systems - New College of Florida
+
+terraform {
+  required_version = ">= 1.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = var.aws_region
+}
+
+variable "aws_region" {
+  default = "us-east-1"
+}
+
+variable "student_id" {
+  default = "macfarlane"
+}
+
+variable "lambda_memory" {
+  default = 512
+}
+
+variable "lambda_timeout" {
+  default = 30
+}
+
+locals {
+  prefix = "adflow-\${var.student_id}"
+  tags = {
+    Project   = "AdFlow"
+    Course    = "IDC5131"
+    Student   = var.student_id
+    ManagedBy = "Terraform"
+  }
+}`;
+
+  const terraformVars = `# terraform.tfvars
+aws_region     = "us-east-1"
+student_id     = "macfarlane"
+lambda_memory  = 512
+lambda_timeout = 30`;
+
+  const terraformResources = `# SQS Queues
+resource "aws_sqs_queue" "input" {
+  name                       = "\${local.prefix}-input"
+  visibility_timeout_seconds = 60
+  message_retention_seconds  = 86400
+  tags                       = local.tags
+}
+
+resource "aws_sqs_queue" "results" {
+  name                       = "\${local.prefix}-results"
+  visibility_timeout_seconds = 30
+  message_retention_seconds  = 86400
+  tags                       = local.tags
+}
+
+# DynamoDB Table
+resource "aws_dynamodb_table" "results" {
+  name         = "\${local.prefix}-results"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "opportunity_id"
+
+  attribute {
+    name = "opportunity_id"
+    type = "S"
+  }
+
+  tags = local.tags
+}
+
+# IAM Role for Lambda
+resource "aws_iam_role" "lambda" {
+  name = "\${local.prefix}-lambda-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Service = "lambda.amazonaws.com"
+      }
+    }]
+  })
+}
+
+# IAM Policy
+resource "aws_iam_role_policy" "lambda" {
+  name = "\${local.prefix}-lambda-policy"
+  role = aws_iam_role.lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"]
+        Resource = aws_sqs_queue.input.arn
+      },
+      {
+        Effect = "Allow"
+        Action = ["sqs:SendMessage"]
+        Resource = aws_sqs_queue.results.arn
+      },
+      {
+        Effect = "Allow"
+        Action = ["dynamodb:PutItem", "dynamodb:BatchWriteItem"]
+        Resource = aws_dynamodb_table.results.arn
+      },
+      {
+        Effect = "Allow"
+        Action = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource = "arn:aws:logs:*:*:*"
+      }
+    ]
+  })
+}`;
+
+  const terraformLambda = `# Lambda Package
+data "archive_file" "lambda" {
+  type        = "zip"
+  source_dir  = "\${path.module}/worker"
+  output_path = "\${path.module}/lambda.zip"
+}
+
+# Lambda Function
+resource "aws_lambda_function" "worker" {
+  filename         = data.archive_file.lambda.output_path
+  function_name    = "\${local.prefix}-worker"
+  role             = aws_iam_role.lambda.arn
+  handler          = "lambda_handler.lambda_handler"
+  runtime          = "python3.11"
+  source_code_hash = data.archive_file.lambda.output_base64sha256
+  memory_size      = var.lambda_memory
+  timeout          = var.lambda_timeout
+
+  environment {
+    variables = {
+      RESULTS_QUEUE_URL = aws_sqs_queue.results.url
+      DYNAMO_TABLE_NAME = aws_dynamodb_table.results.name
+    }
+  }
+
+  tags = local.tags
+}
+
+# SQS Trigger
+resource "aws_lambda_event_source_mapping" "sqs" {
+  event_source_arn = aws_sqs_queue.input.arn
+  function_name    = aws_lambda_function.worker.arn
+  batch_size       = 10
+  function_response_types = ["ReportBatchItemFailures"]
+}
+
+# CloudWatch Logs
+resource "aws_cloudwatch_log_group" "lambda" {
+  name              = "/aws/lambda/\${local.prefix}-worker"
+  retention_in_days = 7
+}`;
+
+  const terraformOutputs = `output "input_queue_url" {
+  value = aws_sqs_queue.input.url
+}
+
+output "results_queue_url" {
+  value = aws_sqs_queue.results.url
+}
+
+output "dynamodb_table_name" {
+  value = aws_dynamodb_table.results.name
+}
+
+output "lambda_function_name" {
+  value = aws_lambda_function.worker.function_name
+}`;
 
   // Warm-up function
   const handleWarmUp = async () => {
@@ -227,6 +425,7 @@ function App() {
                 { id: "test", label: "Live Testing", icon: Play },
                 { id: "architecture", label: "Architecture", icon: Layers },
                 { id: "optimizations", label: "Optimizations", icon: TrendingUp },
+                { id: "terraform", label: "Terraform", icon: Terminal },
                 { id: "course", label: "Course", icon: GraduationCap },
                 { id: "about", label: "About Me", icon: User },
               ].map((tab) => (
@@ -679,6 +878,388 @@ function App() {
                         <p className="text-emerald-400 font-mono text-sm mt-1">{result.change}</p>
                       </div>
                     ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TERRAFORM TAB */}
+            {activeTab === "terraform" && (
+              <div className="space-y-6" data-testid="terraform-content">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                  <div>
+                    <h3 className="text-2xl font-bold text-white">Terraform Deployment</h3>
+                    <p className="text-white/50 text-sm mt-1">Infrastructure as Code alternative to AWS SAM for deploying the AdFlow pipeline</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="px-3 py-1 rounded-full text-xs font-medium bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                      HashiCorp Terraform
+                    </span>
+                    <span className="px-3 py-1 rounded-full text-xs font-medium bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                      AWS Provider
+                    </span>
+                  </div>
+                </div>
+
+                {/* Terraform Files */}
+                <div className="grid lg:grid-cols-2 gap-6">
+                  {/* Main Configuration */}
+                  <div className="space-y-4">
+                    <div className="bg-black/40 rounded-xl border border-white/10 overflow-hidden">
+                      <div className="flex items-center justify-between px-4 py-3 bg-white/5 border-b border-white/10">
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-purple-400" />
+                          <span className="text-white font-mono text-sm">main.tf</span>
+                        </div>
+                        <button
+                          onClick={() => copyToClipboard(terraformMain, 'main')}
+                          className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-white/10 hover:bg-white/20 transition-colors"
+                        >
+                          {copiedCode === 'main' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                          {copiedCode === 'main' ? 'Copied!' : 'Copy'}
+                        </button>
+                      </div>
+                      <pre className="p-4 text-xs text-white/70 overflow-x-auto max-h-96 font-mono leading-relaxed">
+{`# AdFlow Ad Selection Pipeline - Terraform Configuration
+# Author: Matthew R. MacFarlane
+# Course: IDC5131 Distributed Systems - New College of Florida
+
+terraform {
+  required_version = ">= 1.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = var.aws_region
+}
+
+# Variables
+variable "aws_region" {
+  description = "AWS region for deployment"
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "student_id" {
+  description = "Student ID for resource naming"
+  type        = string
+  default     = "macfarlane"
+}
+
+variable "lambda_memory" {
+  description = "Lambda memory size in MB"
+  type        = number
+  default     = 512
+}
+
+variable "lambda_timeout" {
+  description = "Lambda timeout in seconds"
+  type        = number
+  default     = 30
+}
+
+# Local values
+locals {
+  prefix = "adflow-\${var.student_id}"
+  tags = {
+    Project   = "AdFlow"
+    Course    = "IDC5131"
+    Student   = var.student_id
+    ManagedBy = "Terraform"
+  }
+}`}
+                      </pre>
+                    </div>
+
+                    {/* Variables */}
+                    <div className="bg-black/40 rounded-xl border border-white/10 overflow-hidden">
+                      <div className="flex items-center justify-between px-4 py-3 bg-white/5 border-b border-white/10">
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-cyan-400" />
+                          <span className="text-white font-mono text-sm">variables.tf</span>
+                        </div>
+                        <button
+                          onClick={() => copyToClipboard(terraformVars, 'vars')}
+                          className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-white/10 hover:bg-white/20 transition-colors"
+                        >
+                          {copiedCode === 'vars' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                          {copiedCode === 'vars' ? 'Copied!' : 'Copy'}
+                        </button>
+                      </div>
+                      <pre className="p-4 text-xs text-white/70 overflow-x-auto max-h-64 font-mono leading-relaxed">
+{`# terraform.tfvars - Configuration values
+
+aws_region     = "us-east-1"
+student_id     = "macfarlane"
+lambda_memory  = 512
+lambda_timeout = 30
+
+# For production, consider:
+# lambda_memory = 1024  # More CPU for compute-heavy scoring
+# lambda_timeout = 60   # Longer timeout for large batches`}
+                      </pre>
+                    </div>
+                  </div>
+
+                  {/* Resources */}
+                  <div className="space-y-4">
+                    <div className="bg-black/40 rounded-xl border border-white/10 overflow-hidden">
+                      <div className="flex items-center justify-between px-4 py-3 bg-white/5 border-b border-white/10">
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-emerald-400" />
+                          <span className="text-white font-mono text-sm">resources.tf</span>
+                        </div>
+                        <button
+                          onClick={() => copyToClipboard(terraformResources, 'resources')}
+                          className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-white/10 hover:bg-white/20 transition-colors"
+                        >
+                          {copiedCode === 'resources' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                          {copiedCode === 'resources' ? 'Copied!' : 'Copy'}
+                        </button>
+                      </div>
+                      <pre className="p-4 text-xs text-white/70 overflow-x-auto max-h-96 font-mono leading-relaxed">
+{`# SQS Queues
+resource "aws_sqs_queue" "input" {
+  name                       = "\${local.prefix}-input"
+  visibility_timeout_seconds = 60
+  message_retention_seconds  = 86400
+  tags                       = local.tags
+}
+
+resource "aws_sqs_queue" "results" {
+  name                       = "\${local.prefix}-results"
+  visibility_timeout_seconds = 30
+  message_retention_seconds  = 86400
+  tags                       = local.tags
+}
+
+# DynamoDB Table
+resource "aws_dynamodb_table" "results" {
+  name         = "\${local.prefix}-results"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "opportunity_id"
+
+  attribute {
+    name = "opportunity_id"
+    type = "S"
+  }
+
+  tags = local.tags
+}
+
+# IAM Role for Lambda
+resource "aws_iam_role" "lambda" {
+  name = "\${local.prefix}-lambda-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Service = "lambda.amazonaws.com"
+      }
+    }]
+  })
+
+  tags = local.tags
+}
+
+# IAM Policy for Lambda
+resource "aws_iam_role_policy" "lambda" {
+  name = "\${local.prefix}-lambda-policy"
+  role = aws_iam_role.lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes"
+        ]
+        Resource = aws_sqs_queue.input.arn
+      },
+      {
+        Effect = "Allow"
+        Action = ["sqs:SendMessage"]
+        Resource = aws_sqs_queue.results.arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:PutItem",
+          "dynamodb:BatchWriteItem"
+        ]
+        Resource = aws_dynamodb_table.results.arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "arn:aws:logs:*:*:*"
+      }
+    ]
+  })
+}`}
+                      </pre>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Lambda Configuration */}
+                <div className="bg-black/40 rounded-xl border border-white/10 overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-3 bg-white/5 border-b border-white/10">
+                    <div className="flex items-center gap-2">
+                      <Zap className="w-4 h-4 text-amber-400" />
+                      <span className="text-white font-mono text-sm">lambda.tf</span>
+                    </div>
+                    <button
+                      onClick={() => copyToClipboard(terraformLambda, 'lambda')}
+                      className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-white/10 hover:bg-white/20 transition-colors"
+                    >
+                      {copiedCode === 'lambda' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      {copiedCode === 'lambda' ? 'Copied!' : 'Copy'}
+                    </button>
+                  </div>
+                  <pre className="p-4 text-xs text-white/70 overflow-x-auto max-h-80 font-mono leading-relaxed">
+{`# Lambda Function Package
+data "archive_file" "lambda" {
+  type        = "zip"
+  source_dir  = "\${path.module}/worker"
+  output_path = "\${path.module}/lambda.zip"
+}
+
+# Lambda Function
+resource "aws_lambda_function" "worker" {
+  filename         = data.archive_file.lambda.output_path
+  function_name    = "\${local.prefix}-worker"
+  role             = aws_iam_role.lambda.arn
+  handler          = "lambda_handler.lambda_handler"
+  runtime          = "python3.11"
+  source_code_hash = data.archive_file.lambda.output_base64sha256
+  memory_size      = var.lambda_memory
+  timeout          = var.lambda_timeout
+
+  environment {
+    variables = {
+      RESULTS_QUEUE_URL = aws_sqs_queue.results.url
+      DYNAMO_TABLE_NAME = aws_dynamodb_table.results.name
+    }
+  }
+
+  tags = local.tags
+}
+
+# SQS Event Source Mapping
+resource "aws_lambda_event_source_mapping" "sqs" {
+  event_source_arn                   = aws_sqs_queue.input.arn
+  function_name                      = aws_lambda_function.worker.arn
+  batch_size                         = 10
+  maximum_batching_window_in_seconds = 0
+
+  function_response_types = ["ReportBatchItemFailures"]
+}
+
+# CloudWatch Log Group
+resource "aws_cloudwatch_log_group" "lambda" {
+  name              = "/aws/lambda/\${local.prefix}-worker"
+  retention_in_days = 7
+  tags              = local.tags
+}`}
+                  </pre>
+                </div>
+
+                {/* Outputs */}
+                <div className="grid lg:grid-cols-2 gap-6">
+                  <div className="bg-black/40 rounded-xl border border-white/10 overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-3 bg-white/5 border-b border-white/10">
+                      <div className="flex items-center gap-2">
+                        <FileText className="w-4 h-4 text-blue-400" />
+                        <span className="text-white font-mono text-sm">outputs.tf</span>
+                      </div>
+                      <button
+                        onClick={() => copyToClipboard(terraformOutputs, 'outputs')}
+                        className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-white/10 hover:bg-white/20 transition-colors"
+                      >
+                        {copiedCode === 'outputs' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        {copiedCode === 'outputs' ? 'Copied!' : 'Copy'}
+                      </button>
+                    </div>
+                    <pre className="p-4 text-xs text-white/70 overflow-x-auto font-mono leading-relaxed">
+{`output "input_queue_url" {
+  description = "URL of the SQS input queue"
+  value       = aws_sqs_queue.input.url
+}
+
+output "results_queue_url" {
+  description = "URL of the SQS results queue"
+  value       = aws_sqs_queue.results.url
+}
+
+output "dynamodb_table_name" {
+  description = "Name of the DynamoDB results table"
+  value       = aws_dynamodb_table.results.name
+}
+
+output "lambda_function_name" {
+  description = "Name of the Lambda function"
+  value       = aws_lambda_function.worker.function_name
+}
+
+output "lambda_log_group" {
+  description = "CloudWatch log group for Lambda"
+  value       = aws_cloudwatch_log_group.lambda.name
+}`}
+                    </pre>
+                  </div>
+
+                  {/* Deployment Commands */}
+                  <div className="bg-gradient-to-br from-purple-500/10 to-cyan-500/10 rounded-xl p-5 border border-white/10">
+                    <h4 className="text-white font-medium mb-4 flex items-center gap-2">
+                      <Terminal className="w-4 h-4" /> Deployment Commands
+                    </h4>
+                    <div className="space-y-3">
+                      <div className="bg-black/40 rounded-lg p-3">
+                        <p className="text-white/50 text-xs mb-1"># Initialize Terraform</p>
+                        <code className="text-emerald-400 text-sm font-mono">terraform init</code>
+                      </div>
+                      <div className="bg-black/40 rounded-lg p-3">
+                        <p className="text-white/50 text-xs mb-1"># Preview changes</p>
+                        <code className="text-emerald-400 text-sm font-mono">terraform plan</code>
+                      </div>
+                      <div className="bg-black/40 rounded-lg p-3">
+                        <p className="text-white/50 text-xs mb-1"># Deploy infrastructure</p>
+                        <code className="text-emerald-400 text-sm font-mono">terraform apply -auto-approve</code>
+                      </div>
+                      <div className="bg-black/40 rounded-lg p-3">
+                        <p className="text-white/50 text-xs mb-1"># Destroy when done</p>
+                        <code className="text-rose-400 text-sm font-mono">terraform destroy</code>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 pt-4 border-t border-white/10">
+                      <h5 className="text-white/80 text-sm font-medium mb-2">SAM vs Terraform</h5>
+                      <div className="space-y-2 text-xs text-white/50">
+                        <p>• <span className="text-amber-400">SAM</span>: AWS-native, simpler for serverless</p>
+                        <p>• <span className="text-purple-400">Terraform</span>: Multi-cloud, state management</p>
+                        <p>• Both produce identical infrastructure</p>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
