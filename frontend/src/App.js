@@ -701,6 +701,141 @@ output "lambda_function_name" {
                   </div>
                 </div>
 
+                {/* Latency Breakdown Visualization */}
+                {testResults && testResults.latency_breakdown && (
+                  <div className="space-y-4">
+                    {/* Stacked Bar - Service Breakdown */}
+                    <div className="bg-black/40 rounded-xl p-5 border border-white/10">
+                      <h4 className="text-white font-medium mb-1 flex items-center gap-2">
+                        <Gauge className="w-4 h-4 text-cyan-400" /> Latency Breakdown by AWS Service
+                      </h4>
+                      <p className="text-white/40 text-xs mb-4">Where time is spent in the end-to-end pipeline (avg {testResults.stats.avg}ms)</p>
+
+                      {/* Stacked horizontal bar */}
+                      {(() => {
+                        const bd = testResults.latency_breakdown;
+                        const total = Object.values(bd).reduce((a, b) => a + b, 0) || 1;
+                        const segments = [
+                          { key: "sqs_input_accept", label: "SQS Accept", color: "#f59e0b" },
+                          { key: "queue_wait_time", label: "Queue Wait", color: "#ef4444" },
+                          { key: "sqs_lambda_trigger", label: "Lambda Trigger", color: "#f97316" },
+                          { key: "lambda_compute", label: "Lambda Compute", color: "#10b981" },
+                          { key: "lambda_io", label: "Lambda I/O", color: "#06b6d4" },
+                          { key: "sqs_results_delivery", label: "SQS Delivery", color: "#8b5cf6" },
+                        ];
+                        return (
+                          <>
+                            {/* Stacked bar */}
+                            <div className="flex w-full h-10 rounded-lg overflow-hidden mb-3" data-testid="latency-stacked-bar">
+                              {segments.map(seg => {
+                                const pct = ((bd[seg.key] || 0) / total) * 100;
+                                if (pct < 1) return null;
+                                return (
+                                  <div
+                                    key={seg.key}
+                                    className="relative group flex items-center justify-center transition-all hover:opacity-80"
+                                    style={{ width: `${pct}%`, backgroundColor: seg.color, minWidth: pct > 3 ? 0 : '2px' }}
+                                  >
+                                    {pct > 8 && (
+                                      <span className="text-[10px] font-bold text-black/80 truncate px-1">
+                                        {Math.round(pct)}%
+                                      </span>
+                                    )}
+                                    <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-black/90 border border-white/20 rounded-lg px-3 py-2 text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                                      <p className="font-medium text-white">{seg.label}</p>
+                                      <p className="text-white/60">{bd[seg.key]}ms ({Math.round(pct)}%)</p>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            {/* Legend + individual bars */}
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                              {segments.map(seg => {
+                                const val = bd[seg.key] || 0;
+                                const pct = (val / total) * 100;
+                                return (
+                                  <div key={seg.key} className="bg-white/5 rounded-lg p-3">
+                                    <div className="flex items-center gap-2 mb-1">
+                                      <div className="w-3 h-3 rounded-sm flex-shrink-0" style={{ backgroundColor: seg.color }} />
+                                      <span className="text-white/70 text-xs font-medium">{seg.label}</span>
+                                    </div>
+                                    <div className="flex items-baseline gap-2">
+                                      <span className="text-white font-mono text-lg font-bold">{val}</span>
+                                      <span className="text-white/40 text-xs">ms</span>
+                                      <span className="text-white/30 text-xs ml-auto">{Math.round(pct)}%</span>
+                                    </div>
+                                    <div className="w-full h-1 rounded-full bg-white/10 mt-2">
+                                      <div className="h-1 rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: seg.color }} />
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+
+                    {/* Bottleneck Analysis Card */}
+                    {testResults.bottleneck_analysis && (
+                      <div className={`rounded-xl p-5 border ${
+                        testResults.bottleneck_analysis.is_concurrency_limited 
+                          ? 'bg-red-500/5 border-red-500/20' 
+                          : 'bg-emerald-500/5 border-emerald-500/20'
+                      }`} data-testid="bottleneck-analysis">
+                        <div className="flex flex-col md:flex-row md:items-start gap-4">
+                          <div className="flex-1">
+                            <h4 className="text-white font-medium mb-2 flex items-center gap-2">
+                              <Target className="w-4 h-4" /> Bottleneck Analysis
+                            </h4>
+                            <div className="space-y-2 text-sm">
+                              <div className="flex items-center gap-2">
+                                <span className="text-white/50">Primary Bottleneck:</span>
+                                <span className={`px-2 py-0.5 rounded font-medium text-xs ${
+                                  testResults.bottleneck_analysis.is_concurrency_limited 
+                                    ? 'bg-red-500/20 text-red-400' 
+                                    : 'bg-amber-500/20 text-amber-400'
+                                }`}>
+                                  {testResults.bottleneck_analysis.primary_bottleneck.replace(/_/g, ' ').toUpperCase()}
+                                </span>
+                                <span className="text-white/40">({testResults.bottleneck_analysis.bottleneck_percentage}% of total)</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-white/50">Concurrency Limited:</span>
+                                <span className={testResults.bottleneck_analysis.is_concurrency_limited ? 'text-red-400' : 'text-emerald-400'}>
+                                  {testResults.bottleneck_analysis.is_concurrency_limited ? 'Yes' : 'No'}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-white/50">Lambda Concurrency:</span>
+                                <span className="text-white/80 font-mono">{testResults.bottleneck_analysis.lambda_concurrency_used}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-white/50">Throughput:</span>
+                                <span className="text-white/80 font-mono">{testResults.bottleneck_analysis.messages_per_second} msg/sec</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="md:w-64 bg-black/30 rounded-lg p-4">
+                            <p className="text-white/50 text-xs uppercase tracking-wider mb-2">Recommendation</p>
+                            <p className="text-white/80 text-sm">{testResults.bottleneck_analysis.recommendation}</p>
+                            {testResults.bottleneck_analysis.is_concurrency_limited && (
+                              <div className="mt-3 pt-3 border-t border-white/10">
+                                <p className="text-white/50 text-xs">Est. latency with more concurrency:</p>
+                                <p className="text-emerald-400 font-mono text-lg font-bold">
+                                  {testResults.bottleneck_analysis.estimated_latency_with_more_concurrency}ms
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Test Profiles Info */}
                 <div className="bg-black/40 rounded-xl p-4 border border-white/10">
                   <h4 className="text-white font-medium mb-3">About These Tests (From Professor's Test Apparatus)</h4>
