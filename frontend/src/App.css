@@ -1,34 +1,168 @@
-.App-logo {
-    height: 40vmin;
-    pointer-events: none;
+/* AdFlow Portfolio Styles */
+
+.App {
+    min-height: 100vh;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-    .App-logo {
-        animation: App-logo-spin infinite 20s linear;
+/* Smooth animations */
+* {
+    transition-property: color, background-color, border-color, opacity, transform;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    transition-duration: 150ms;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+/* Gradient text animation */
+@keyframes gradient-shift {
+    0%, 100% {
+        background-position: 0% 50%;
+    }
+    50% {
+        background-position: 100% 50%;
     }
 }
 
-.App-header {
-    background-color: #0f0f10;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    font-size: calc(10px + 2vmin);
+.animate-gradient {
+    background-size: 200% 200%;
+    animation: gradient-shift 8s ease infinite;
+}
+
+/* Glow effects */
+.glow-emerald {
+    box-shadow: 0 0 20px rgba(16, 185, 129, 0.3),
+                0 0 40px rgba(16, 185, 129, 0.1);
+}
+
+.glow-cyan {
+    box-shadow: 0 0 20px rgba(6, 182, 212, 0.3),
+                0 0 40px rgba(6, 182, 212, 0.1);
+}
+
+/* Pulse animation for status indicators */
+@keyframes pulse-glow {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.5;
+        transform: scale(1.1);
+    }
+}
+
+.animate-pulse {
+    animation: pulse-glow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Card hover effects */
+.card-hover {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.card-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+
+/* Link underline animation */
+.link-underline {
+    position: relative;
+}
+
+.link-underline::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    width: 0;
+    height: 1px;
+    background: currentColor;
+    transition: width 0.3s ease;
+}
+
+.link-underline:hover::after {
+    width: 100%;
+}
+
+/* Tab indicator */
+.tab-active {
+    position: relative;
+}
+
+.tab-active::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, #10b981, #06b6d4);
+}
+
+/* Architecture diagram connector lines */
+.connector-line {
+    background: linear-gradient(90deg, 
+        rgba(255, 255, 255, 0.3), 
+        rgba(255, 255, 255, 0.1), 
+        transparent
+    );
+}
+
+/* Code block styling */
+code {
+    font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Monaco, Consolas, monospace;
+}
+
+/* Selection styling */
+::selection {
+    background: rgba(16, 185, 129, 0.3);
     color: white;
 }
 
-.App-link {
-    color: #61dafb;
+/* Focus states for accessibility */
+button:focus-visible,
+a:focus-visible {
+    outline: 2px solid rgba(16, 185, 129, 0.5);
+    outline-offset: 2px;
 }
 
-@keyframes App-logo-spin {
-    from {
-        transform: rotate(0deg);
+/* Responsive typography */
+@media (max-width: 768px) {
+    h1 {
+        font-size: 1.875rem !important;
     }
-    to {
-        transform: rotate(360deg);
+    
+    h2 {
+        font-size: 2rem !important;
+    }
+}
+
+/* Print styles */
+@media print {
+    .no-print {
+        display: none !important;
+    }
+    
+    body {
+        background: white !important;
+        color: black !important;
     }
 }
