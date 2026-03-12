@@ -6,7 +6,7 @@ import {
   Play, Square, RefreshCw, Flame, Activity, Clock, TrendingUp, 
   CheckCircle2, AlertCircle, Cpu, FileText, User, Briefcase, Globe,
   ChevronDown, ChevronUp, Target, Layers, Settings, Copy, Check, Terminal,
-  Wifi, WifiOff, Gauge
+  Wifi, WifiOff, Gauge, Trash2
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, Legend, AreaChart, Area } from 'recharts';
 
@@ -22,6 +22,9 @@ function App() {
   const [expandedSection, setExpandedSection] = useState(null);
   const [copiedCode, setCopiedCode] = useState(null);
   const [pcStatus, setPcStatus] = useState({ current_pc: 0, status: 'unknown' });
+  const [testHistory, setTestHistory] = useState([]);
+  const [selectedRuns, setSelectedRuns] = useState([]);
+  const [showHistory, setShowHistory] = useState(false);
   const testRef = useRef(null);
 
   // Heartbeat to keep Lambda warm when user is active
@@ -62,6 +65,43 @@ function App() {
     const interval = setInterval(fetchPCStatus, 10000);
     return () => clearInterval(interval);
   }, []);
+
+  // Fetch test history
+  const fetchHistory = async () => {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/test-history`);
+      const data = await response.json();
+      setTestHistory(data);
+    } catch (error) {
+      console.log('History fetch failed:', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchHistory();
+  }, []);
+
+  // Toggle run selection for comparison
+  const toggleRunSelection = (run) => {
+    setSelectedRuns(prev => {
+      const exists = prev.find(r => r.id === run.id);
+      if (exists) return prev.filter(r => r.id !== run.id);
+      if (prev.length >= 4) return prev; // max 4 comparisons
+      return [...prev, run];
+    });
+  };
+
+  const deleteHistoryEntry = async (id) => {
+    await fetch(`${BACKEND_URL}/api/test-history/${id}`, { method: 'DELETE' });
+    setSelectedRuns(prev => prev.filter(r => r.id !== id));
+    fetchHistory();
+  };
+
+  const clearHistory = async () => {
+    await fetch(`${BACKEND_URL}/api/test-history`, { method: 'DELETE' });
+    setSelectedRuns([]);
+    fetchHistory();
+  };
 
   // Copy to clipboard function
   const copyToClipboard = (text, id) => {
@@ -302,6 +342,7 @@ output "lambda_function_name" {
       const data = await response.json();
       setTestResults(data);
       setTestState("complete");
+      fetchHistory();
     } catch (error) {
       // Simulate test results for demo
       const profile = profiles[testProfile];
@@ -835,6 +876,175 @@ output "lambda_function_name" {
                     )}
                   </div>
                 )}
+
+                {/* Test History & Comparison */}
+                <div className="bg-black/40 rounded-xl border border-white/10 overflow-hidden" data-testid="test-history-panel">
+                  <button 
+                    onClick={() => setShowHistory(!showHistory)}
+                    className="w-full flex items-center justify-between px-5 py-4 hover:bg-white/5 transition-colors"
+                    data-testid="toggle-history-btn"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-cyan-400" />
+                      <h4 className="text-white font-medium">Test History & Comparison</h4>
+                      <span className="text-white/30 text-xs ml-2">({testHistory.length} runs)</span>
+                    </div>
+                    {showHistory ? <ChevronUp className="w-4 h-4 text-white/50" /> : <ChevronDown className="w-4 h-4 text-white/50" />}
+                  </button>
+
+                  {showHistory && (
+                    <div className="border-t border-white/10 p-5 space-y-4">
+                      {/* Comparison Chart */}
+                      {selectedRuns.length > 0 && (
+                        <div className="bg-white/5 rounded-xl p-4 border border-white/10">
+                          <h5 className="text-white font-medium mb-3 flex items-center gap-2">
+                            <BarChart3 className="w-4 h-4 text-emerald-400" /> Comparing {selectedRuns.length} Run{selectedRuns.length > 1 ? 's' : ''}
+                          </h5>
+                          <div className="h-56">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <BarChart data={selectedRuns.map(r => ({
+                                name: `${r.profile} ${new Date(r.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`,
+                                min: r.stats.min,
+                                avg: r.stats.avg,
+                                p95: r.stats.p95,
+                                max: r.stats.max,
+                              }))}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+                                <XAxis dataKey="name" stroke="#666" fontSize={10} />
+                                <YAxis stroke="#666" fontSize={10} label={{ value: 'ms', position: 'insideLeft', fill: '#666', fontSize: 10 }} />
+                                <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #333' }} />
+                                <Legend />
+                                <Bar dataKey="min" fill="#10b981" name="Min" />
+                                <Bar dataKey="avg" fill="#06b6d4" name="Avg" />
+                                <Bar dataKey="p95" fill="#f59e0b" name="p95" />
+                                <Bar dataKey="max" fill="#ef4444" name="Max" />
+                              </BarChart>
+                            </ResponsiveContainer>
+                          </div>
+
+                          {/* Latency breakdown overlay comparison */}
+                          {selectedRuns.some(r => r.latency_breakdown) && (
+                            <div className="mt-4 pt-4 border-t border-white/10">
+                              <h5 className="text-white/70 text-sm font-medium mb-3">Service Breakdown Comparison</h5>
+                              <div className="h-48">
+                                <ResponsiveContainer width="100%" height="100%">
+                                  <BarChart data={selectedRuns.filter(r => r.latency_breakdown).map(r => ({
+                                    name: `${r.profile} ${new Date(r.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`,
+                                    'SQS Accept': r.latency_breakdown.sqs_input_accept || 0,
+                                    'Queue Wait': r.latency_breakdown.queue_wait_time || 0,
+                                    'Lambda Trigger': r.latency_breakdown.sqs_lambda_trigger || 0,
+                                    'Compute': r.latency_breakdown.lambda_compute || 0,
+                                    'I/O': r.latency_breakdown.lambda_io || 0,
+                                    'SQS Delivery': r.latency_breakdown.sqs_results_delivery || 0,
+                                  }))}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+                                    <XAxis dataKey="name" stroke="#666" fontSize={10} />
+                                    <YAxis stroke="#666" fontSize={10} label={{ value: 'ms', position: 'insideLeft', fill: '#666', fontSize: 10 }} />
+                                    <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #333' }} />
+                                    <Legend />
+                                    <Bar dataKey="SQS Accept" stackId="a" fill="#f59e0b" />
+                                    <Bar dataKey="Queue Wait" stackId="a" fill="#ef4444" />
+                                    <Bar dataKey="Lambda Trigger" stackId="a" fill="#f97316" />
+                                    <Bar dataKey="Compute" stackId="a" fill="#10b981" />
+                                    <Bar dataKey="I/O" stackId="a" fill="#06b6d4" />
+                                    <Bar dataKey="SQS Delivery" stackId="a" fill="#8b5cf6" />
+                                  </BarChart>
+                                </ResponsiveContainer>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* History table */}
+                      {testHistory.length > 0 ? (
+                        <div>
+                          <div className="flex items-center justify-between mb-3">
+                            <p className="text-white/40 text-xs">Select up to 4 runs to compare. Click a row to toggle.</p>
+                            <button onClick={clearHistory} className="text-red-400/60 hover:text-red-400 text-xs transition-colors" data-testid="clear-history-btn">
+                              Clear All
+                            </button>
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm" data-testid="history-table">
+                              <thead>
+                                <tr className="border-b border-white/10">
+                                  <th className="text-left text-white/40 font-medium py-2 px-3 text-xs"></th>
+                                  <th className="text-left text-white/40 font-medium py-2 px-3 text-xs">Profile</th>
+                                  <th className="text-left text-white/40 font-medium py-2 px-3 text-xs">Time</th>
+                                  <th className="text-right text-white/40 font-medium py-2 px-3 text-xs">Sent</th>
+                                  <th className="text-right text-white/40 font-medium py-2 px-3 text-xs">Recv</th>
+                                  <th className="text-right text-white/40 font-medium py-2 px-3 text-xs">Avg</th>
+                                  <th className="text-right text-white/40 font-medium py-2 px-3 text-xs">p95</th>
+                                  <th className="text-right text-white/40 font-medium py-2 px-3 text-xs">Throughput</th>
+                                  <th className="text-right text-white/40 font-medium py-2 px-3 text-xs">Bottleneck</th>
+                                  <th className="text-right text-white/40 font-medium py-2 px-3 text-xs"></th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {testHistory.map((run) => {
+                                  const isSelected = selectedRuns.some(r => r.id === run.id);
+                                  return (
+                                    <tr 
+                                      key={run.id}
+                                      onClick={() => toggleRunSelection(run)}
+                                      className={`border-b border-white/5 cursor-pointer transition-colors ${
+                                        isSelected ? 'bg-emerald-500/10' : 'hover:bg-white/5'
+                                      }`}
+                                      data-testid={`history-row-${run.id}`}
+                                    >
+                                      <td className="py-2 px-3">
+                                        <div className={`w-4 h-4 rounded border-2 flex items-center justify-center ${
+                                          isSelected ? 'border-emerald-400 bg-emerald-500/20' : 'border-white/20'
+                                        }`}>
+                                          {isSelected && <Check className="w-3 h-3 text-emerald-400" />}
+                                        </div>
+                                      </td>
+                                      <td className="py-2 px-3">
+                                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                          run.profile === 'burst' ? 'bg-red-500/20 text-red-400' :
+                                          run.profile === 'steady' ? 'bg-blue-500/20 text-blue-400' :
+                                          run.profile === 'soak' ? 'bg-purple-500/20 text-purple-400' :
+                                          'bg-amber-500/20 text-amber-400'
+                                        }`}>
+                                          {run.profile}
+                                        </span>
+                                      </td>
+                                      <td className="py-2 px-3 text-white/50 text-xs font-mono">
+                                        {new Date(run.timestamp).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})}
+                                      </td>
+                                      <td className="py-2 px-3 text-right text-white/60 font-mono">{run.sent}</td>
+                                      <td className="py-2 px-3 text-right text-white/60 font-mono">{run.received}</td>
+                                      <td className="py-2 px-3 text-right text-cyan-400 font-mono">{run.stats.avg}ms</td>
+                                      <td className="py-2 px-3 text-right text-amber-400 font-mono">{run.stats.p95}ms</td>
+                                      <td className="py-2 px-3 text-right text-white/60 font-mono">{run.throughput}/s</td>
+                                      <td className="py-2 px-3 text-right text-white/40 text-xs">
+                                        {run.bottleneck_analysis ? run.bottleneck_analysis.primary_bottleneck.replace(/_/g, ' ') : '—'}
+                                      </td>
+                                      <td className="py-2 px-3 text-right">
+                                        <button 
+                                          onClick={(e) => { e.stopPropagation(); deleteHistoryEntry(run.id); }}
+                                          className="text-white/20 hover:text-red-400 transition-colors"
+                                          data-testid={`delete-run-${run.id}`}
+                                        >
+                                          <Trash2 className="w-3 h-3" />
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-center py-8 text-white/30 text-sm">
+                          No test history yet. Run a test to start tracking performance over time.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
 
                 {/* Test Profiles Info */}
                 <div className="bg-black/40 rounded-xl p-4 border border-white/10">

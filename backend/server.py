@@ -131,8 +131,20 @@ class TestResponse(BaseModel):
     distribution: dict
     throughput: float
     latencies: List[float] = []
-    latency_breakdown: Optional[dict] = None  # Breakdown by service
-    bottleneck_analysis: Optional[dict] = None  # Bottleneck identification
+    latency_breakdown: Optional[dict] = None
+    bottleneck_analysis: Optional[dict] = None
+
+class TestHistoryEntry(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    profile: str
+    timestamp: str
+    sent: int
+    received: int
+    stats: dict
+    distribution: dict
+    throughput: float
+    latency_breakdown: Optional[dict] = None
+    bottleneck_analysis: Optional[dict] = None
 
 def generate_opportunity():
     """Generate a single ad opportunity matching the professor's test apparatus format."""
@@ -389,7 +401,7 @@ async def run_test(request: TestRequest):
             latency_breakdown = None
             bottleneck_analysis = None
         
-        return TestResponse(
+        result = TestResponse(
             sent=count,
             received=len(received_ids),
             stats=stats,
@@ -399,6 +411,23 @@ async def run_test(request: TestRequest):
             latency_breakdown=latency_breakdown,
             bottleneck_analysis=bottleneck_analysis
         )
+        
+        # Save to history
+        history_entry = {
+            "id": str(uuid.uuid4()),
+            "profile": request.profile,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "sent": result.sent,
+            "received": result.received,
+            "stats": result.stats,
+            "distribution": result.distribution,
+            "throughput": result.throughput,
+            "latency_breakdown": result.latency_breakdown,
+            "bottleneck_analysis": result.bottleneck_analysis,
+        }
+        await db.test_history.insert_one(history_entry)
+        
+        return result
         
     except Exception as e:
         logger.error(f"Test failed: {e}")
@@ -446,6 +475,29 @@ app.add_middleware(
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
+
+# ============================================================================
+# TEST HISTORY API
+# ============================================================================
+
+@api_router.get("/test-history")
+async def get_test_history():
+    """Get past test runs for comparison."""
+    entries = await db.test_history.find({}, {"_id": 0}).sort("timestamp", -1).to_list(50)
+    return entries
+
+@api_router.delete("/test-history/{entry_id}")
+async def delete_history_entry(entry_id: str):
+    """Delete a specific test history entry."""
+    await db.test_history.delete_one({"id": entry_id})
+    return {"deleted": True}
+
+@api_router.delete("/test-history")
+async def clear_test_history():
+    """Clear all test history."""
+    result = await db.test_history.delete_many({})
+    return {"deleted": result.deleted_count}
 
 
 # ============================================================================
