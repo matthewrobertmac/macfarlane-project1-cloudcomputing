@@ -440,11 +440,11 @@ output "lambda_function_name" {
                   </span>
                 </div>
 
-                <a href="https://github.com/mattmacf98" target="_blank" rel="noopener noreferrer" 
+                <a href="https://github.com/matthewrobertmac" target="_blank" rel="noopener noreferrer" 
                    className="p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-all hover:scale-105" data-testid="github-link">
                   <Github className="w-5 h-5 text-white/80" />
                 </a>
-                <a href="https://linkedin.com/in/matthew-macfarlane" target="_blank" rel="noopener noreferrer"
+                <a href="https://www.linkedin.com/in/mattmacfa/" target="_blank" rel="noopener noreferrer"
                    className="p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-all hover:scale-105" data-testid="linkedin-link">
                   <Linkedin className="w-5 h-5 text-white/80" />
                 </a>
@@ -1972,13 +1972,13 @@ output "lambda_log_group" {
                           <Mail className="w-4 h-4" />
                           <span className="text-sm">matthew.macfarlane27@ncf.edu</span>
                         </a>
-                        <a href="https://github.com/mattmacf98" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 text-white/70 hover:text-white transition-colors">
+                        <a href="https://github.com/matthewrobertmac" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 text-white/70 hover:text-white transition-colors">
                           <Github className="w-4 h-4" />
-                          <span className="text-sm">github.com/mattmacf98</span>
+                          <span className="text-sm">github.com/matthewrobertmac</span>
                         </a>
-                        <a href="https://linkedin.com/in/matthew-macfarlane" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 text-white/70 hover:text-white transition-colors">
+                        <a href="https://www.linkedin.com/in/mattmacfa/" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 text-white/70 hover:text-white transition-colors">
                           <Linkedin className="w-4 h-4" />
-                          <span className="text-sm">linkedin.com/in/matthew-macfarlane</span>
+                          <span className="text-sm">linkedin.com/in/mattmacfa</span>
                         </a>
                         <div className="flex items-center gap-3 text-white/70">
                           <MapPin className="w-4 h-4" />
