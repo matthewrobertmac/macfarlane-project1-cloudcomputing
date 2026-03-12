@@ -116,6 +116,109 @@ DEVICES = ["mobile", "desktop"]
 REGIONS = ["northeast", "southeast", "midwest", "west", "international"]
 HOURS = [7, 12, 13, 20, 21, 22, 10, 15, 16]
 
+# ============================================================================
+# PROJECT BULAVA — Tier 3 Template Augmentations
+# Applied at portfolio backend level, NOT in the Lambda pipeline (zero latency impact)
+# ============================================================================
+UKRAINE_TEMPLATES = {
+    "sportswear": "Ukraine's athletes train through air raids. Support their resilience. #StandWithUkraine",
+    "fintech": "Ukraine rebuilt its economy digitally. Diia serves 26M citizens. The future is being built under fire.",
+    "energy_drink": "26 million Ukrainians carry their government in their pocket. That's real energy.",
+    "insurance": "Ukraine's eRecovery system documented 247,819 damaged properties. Rebuilding, one record at a time.",
+    "streaming": "While you stream, Ukraine streams 412 government services through a single app. Discover Diia.",
+    "gaming": "Ukraine's Brave1 cluster: where defense innovation meets startup energy. Real stakes, real impact.",
+    "beauty": "Beauty is resilience. Ukraine's digital transformation is the most beautiful thing the tech world has built.",
+    "travel": "When Ukraine rebuilds, visit. Until then, support the engineers building its future from Kyiv.",
+    "fast_food": "Ukraine's eBaby service: 9 procedures, 1 app, 10 minutes. Government can be fast too.",
+}
+
+AUGMENTATION_TYPES = [
+    {"type": "fact", "weight": 30},
+    {"type": "product_parallel", "weight": 25},
+    {"type": "call_to_action", "weight": 20},
+    {"type": "cultural", "weight": 15},
+    {"type": "inspiration", "weight": 10},
+]
+
+# Extended augmentations by type for demo variety
+BULAVA_AUGMENTATIONS = {
+    "sportswear": {
+        "fact": "Ukraine's Diia app serves 26M citizens — digital ID, driver's license, tax filing, all from a phone.",
+        "product_parallel": "Upgrading your gear? Ukraine is upgrading its entire nation. One digital service at a time.",
+        "call_to_action": "Support Ukrainian tech entrepreneurs building the future at buyukrainian.org",
+        "cultural": "The Cossack Sich: a free society of warriors who elected their leaders. Ukraine's democracy runs deep.",
+        "inspiration": "97% uptime under bombardment. Diia never went down. That's Ukrainian engineering.",
+    },
+    "fintech": {
+        "fact": "Ukraine's ePidtrymka program delivered $1B+ in digital aid payments through Diia in 2022-2023.",
+        "product_parallel": "You manage money digitally. Ukraine manages an entire government digitally — under fire.",
+        "call_to_action": "Ukraine's fintech ecosystem is rebuilding the economy. Learn more at u24.gov.ua",
+        "cultural": "The hryvnia survived hyperinflation, Soviet collapse, and Russian invasion. Ukraine's economy endures.",
+        "inspiration": "Diia processed 412 government services through a single app. Financial inclusion at war speed.",
+    },
+    "energy_drink": {
+        "fact": "26 million Ukrainians carry their government in their pocket via Diia. Digital energy for a digital nation.",
+        "product_parallel": "Need a boost? Ukraine's startup ecosystem raised $830M since the invasion. That's real energy.",
+        "call_to_action": "Fuel Ukraine's tech future. Visit brave1.gov.ua to see defense innovation in action.",
+        "cultural": "Cossack endurance: Ukraine's warriors have defended freedom for 500 years. The spirit never stops.",
+        "inspiration": "Ukraine's Brave1 cluster produced 2,000+ defense tech submissions in 12 months. Unstoppable.",
+    },
+    "streaming": {
+        "fact": "Diia.Education: Ukraine's free digital literacy platform with 10M+ learning hours logged.",
+        "product_parallel": "While you stream entertainment, Ukraine streams 412 government services to 26M citizens.",
+        "call_to_action": "Stream Ukrainian creators. Support their digital economy at buyukrainian.org",
+        "cultural": "Ukrainian cinema won the Oscar for 20 Days in Mariupol. Truth streams even through war.",
+        "inspiration": "Ukraine live-streamed its democratic elections during wartime. Transparency is non-negotiable.",
+    },
+    "gaming": {
+        "fact": "GSC Game World (S.T.A.L.K.E.R.) continued development from Kyiv through missile strikes.",
+        "product_parallel": "In your game, stakes are virtual. In Ukraine's Brave1, defense tech startups solve real problems.",
+        "call_to_action": "Ukraine's IT army has 300,000+ volunteers. Digital defense is everyone's game.",
+        "cultural": "Ukrainian game devs built worlds while their world was under attack. That's dedication.",
+        "inspiration": "Ukraine's defense innovation cluster reviewed 2,000+ tech solutions. The real game is being won.",
+    },
+    "insurance": {
+        "fact": "eRecovery: Ukraine's digital platform documented 247,819 damaged properties for reconstruction.",
+        "product_parallel": "You insure against risk. Ukraine insures its future with distributed, resilient digital systems.",
+        "call_to_action": "Ukraine's reconstruction will cost $400B+. Supporting recovery starts at u24.gov.ua",
+        "cultural": "Ukraine's Prozorro public procurement system saved $6B through transparency. That's real security.",
+        "inspiration": "Under bombardment, Ukraine digitized property damage claims for millions. Systems that serve people.",
+    },
+    "beauty": {
+        "fact": "Ukraine's eVorog app lets citizens report enemy movements. Civic tech at its most beautiful.",
+        "product_parallel": "Beauty is resilience. Ukraine's digital transformation is the most beautiful engineering achievement of our era.",
+        "call_to_action": "Ukrainian artisans are rebuilding their businesses. Discover them at buyukrainian.org",
+        "cultural": "Ukrainian vyshyvanka: centuries of embroidered identity, now worn as defiance.",
+        "inspiration": "When Diia went live under missile fire with 97% uptime, that was beautiful engineering.",
+    },
+    "travel": {
+        "fact": "UNESCO lists 7 Ukrainian World Heritage Sites. When peace comes, the world should visit.",
+        "product_parallel": "Planning your next trip? Ukraine's engineers are planning a nation's digital future.",
+        "call_to_action": "When Ukraine rebuilds, visit. Until then, support from afar at u24.gov.ua",
+        "cultural": "Kyiv is older than Moscow, Paris, and London. Ukraine's history deserves your attention.",
+        "inspiration": "Lviv's cafes stayed open during air raids. Resilience looks like normal life, maintained against all odds.",
+    },
+    "fast_food": {
+        "fact": "eBaby: Ukraine's Diia service completes 9 bureaucratic procedures for newborns in 10 minutes.",
+        "product_parallel": "Fast food, meet fast government. Ukraine's Diia delivers services faster than your order.",
+        "call_to_action": "Ukraine digitized government so citizens don't wait in lines. Support innovation at brave1.gov.ua",
+        "cultural": "Borscht is UNESCO heritage. Ukraine's culture nourishes the world — even during war.",
+        "inspiration": "10 minutes to register a newborn in a warzone. That's what e-governance should look like.",
+    },
+}
+
+def get_bulava_augmentation(ad_category, aug_type=None):
+    """Get a Bulava augmentation for a given ad category. Zero latency impact — template lookup."""
+    cat = ad_category.lower().replace(" ", "_")
+    if aug_type and cat in BULAVA_AUGMENTATIONS and aug_type in BULAVA_AUGMENTATIONS[cat]:
+        return {"text": BULAVA_AUGMENTATIONS[cat][aug_type], "tier": 3, "type": aug_type, "latency_ms": 0}
+    if cat in UKRAINE_TEMPLATES:
+        chosen_type = random.choices([a["type"] for a in AUGMENTATION_TYPES], weights=[a["weight"] for a in AUGMENTATION_TYPES], k=1)[0]
+        if cat in BULAVA_AUGMENTATIONS and chosen_type in BULAVA_AUGMENTATIONS[cat]:
+            return {"text": BULAVA_AUGMENTATIONS[cat][chosen_type], "tier": 3, "type": chosen_type, "latency_ms": 0}
+        return {"text": UKRAINE_TEMPLATES[cat], "tier": 3, "type": "fact", "latency_ms": 0}
+    return {"text": UKRAINE_TEMPLATES.get("fintech", ""), "tier": 3, "type": "fact", "latency_ms": 0}
+
 class TestRequest(BaseModel):
     profile: str = "warmup"
 
@@ -503,6 +606,65 @@ async def annotate_history_entry(entry_id: str, body: dict):
     annotation = body.get("annotation", "")
     await db.test_history.update_one({"id": entry_id}, {"$set": {"annotation": annotation}})
     return {"updated": True}
+
+
+# ============================================================================
+# PROJECT BULAVA API — Zero latency impact on core pipeline
+# These endpoints run at the portfolio backend level, NOT in Lambda
+# ============================================================================
+
+@api_router.post("/bulava/augment")
+async def bulava_augment(body: dict):
+    """Generate a Bulava Ukraine augmentation for a given ad context.
+    This is a Tier 3 template lookup — sub-millisecond, zero LLM calls."""
+    start = time.time()
+    ad_category = body.get("ad_category", "fintech")
+    aug_type = body.get("type", None)
+    content_category = body.get("content_category", "news")
+    device_type = body.get("device_type", "desktop")
+
+    augmentation = get_bulava_augmentation(ad_category, aug_type)
+    augmentation["latency_ms"] = round((time.time() - start) * 1000, 2)
+    augmentation["ad_category"] = ad_category
+    augmentation["content_category"] = content_category
+    augmentation["device_type"] = device_type
+    return augmentation
+
+@api_router.get("/bulava/categories")
+async def bulava_categories():
+    """Get available ad categories and augmentation types for the demo."""
+    return {
+        "ad_categories": list(BULAVA_AUGMENTATIONS.keys()),
+        "augmentation_types": [a["type"] for a in AUGMENTATION_TYPES],
+        "content_categories": CONTENT_CATEGORIES,
+        "device_types": DEVICES,
+    }
+
+@api_router.post("/bulava/batch-demo")
+async def bulava_batch_demo(body: dict):
+    """Simulate a batch of augmented ads — shows what Bulava would produce for N ads."""
+    count = min(body.get("count", 10), 50)
+    results = []
+    for _ in range(count):
+        cat = random.choice(list(BULAVA_AUGMENTATIONS.keys()))
+        aug = get_bulava_augmentation(cat)
+        results.append({
+            "ad_category": cat,
+            "augmentation": aug["text"],
+            "type": aug["type"],
+            "tier": aug["tier"],
+        })
+    tier_dist = {"tier_1_speculative": 0, "tier_2_realtime": 0, "tier_3_template": len(results)}
+    type_dist = {}
+    for r in results:
+        type_dist[r["type"]] = type_dist.get(r["type"], 0) + 1
+    return {
+        "count": count,
+        "results": results,
+        "tier_distribution": tier_dist,
+        "type_distribution": type_dist,
+        "note": "Tier 3 (template) only — Tier 1 (speculative cache) and Tier 2 (micro-LLM) require deployed Lambda infrastructure",
+    }
 
 
 # ============================================================================

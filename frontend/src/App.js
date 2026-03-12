@@ -35,7 +35,7 @@ const TABS = [
   { id: "terraform", label: "Terraform", icon: Terminal },
   { id: "course", label: "Course", icon: BookOpen },
   { id: "about", label: "About Matt", icon: User },
-  { id: "ukraine", label: "Ukraine", icon: Flag, accent: true },
+  { id: "bulava", label: "Bulava", icon: Shield, accent: true },
 ];
 
 const profiles = {
@@ -183,6 +183,10 @@ function App() {
   const [annotatingId, setAnnotatingId] = useState(null);
   const [annotationText, setAnnotationText] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [bulavaDemo, setBulavaDemo] = useState(null);
+  const [bulavaCategory, setBulavaCategory] = useState("sportswear");
+  const [bulavaType, setBulavaType] = useState("fact");
+  const [bulavaBatch, setBulavaBatch] = useState(null);
   const testRef = useRef(null);
 
   // Heartbeat
@@ -242,6 +246,30 @@ function App() {
     await fetch(`${BACKEND_URL}/api/test-history`, { method: "DELETE" });
     setSelectedRuns([]);
     fetchHistory();
+  };
+
+  const generateBulavaAugmentation = async () => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/bulava/augment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ad_category: bulavaCategory, type: bulavaType }),
+      });
+      const data = await res.json();
+      setBulavaDemo(data);
+    } catch (e) { console.log("Bulava augment failed:", e); }
+  };
+
+  const runBulavaBatchDemo = async () => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/bulava/batch-demo`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ count: 20 }),
+      });
+      const data = await res.json();
+      setBulavaBatch(data);
+    } catch (e) { console.log("Bulava batch failed:", e); }
   };
 
   const saveAnnotation = async (id, text) => {
@@ -422,12 +450,12 @@ function App() {
                     Run a Live Test
                   </button>
                   <button
-                    onClick={() => setActiveTab("ukraine")}
+                    onClick={() => setActiveTab("bulava")}
                     className="px-6 py-2.5 rounded-full font-medium text-sm transition-all hover:opacity-90"
                     style={{ background: `${C.gold}20`, color: C.gold, border: `1px solid ${C.gold}40` }}
                     data-testid="hero-ukraine-btn"
                   >
-                    Read the Story
+                    Project Bulava
                     <ArrowRight className="w-4 h-4 inline ml-2" />
                   </button>
                 </div>
@@ -472,7 +500,7 @@ function App() {
               </div>
 
               {/* Ukraine teaser */}
-              <div className="rounded-xl p-5 border cursor-pointer hover:border-[#FFD500]/30 transition-all" style={{ background: `linear-gradient(135deg, ${C.blue}08, ${C.gold}08)`, borderColor: `${C.gold}20` }} onClick={() => setActiveTab("ukraine")}>
+              <div className="rounded-xl p-5 border cursor-pointer hover:border-[#FFD500]/30 transition-all" style={{ background: `linear-gradient(135deg, ${C.blue}08, ${C.gold}08)`, borderColor: `${C.gold}20` }} onClick={() => setActiveTab("bulava")}>
                 <div className="flex items-center gap-3">
                   <Flag className="w-5 h-5 flex-shrink-0" style={{ color: C.gold }} />
                   <div>
@@ -1265,24 +1293,223 @@ function App() {
           )}
 
           {/* ============================================================== */}
-          {/* UKRAINE */}
+          {/* PROJECT BULAVA */}
           {/* ============================================================== */}
-          {activeTab === "ukraine" && (
-            <div className="space-y-6" data-testid="ukraine-content">
+          {activeTab === "bulava" && (
+            <div className="space-y-6" data-testid="bulava-content">
               {/* Hero */}
               <div className="rounded-xl p-8 text-center" style={{ background: `linear-gradient(135deg, ${C.blue}20, ${C.gold}08)`, border: `1px solid ${C.gold}25` }}>
-                <p className="font-mono text-xs tracking-wider mb-3" style={{ color: C.gold }}>THE TECHNOLOGICAL REPUBLIC</p>
-                <h2 className="text-2xl md:text-3xl font-bold text-white mb-3">Ukraine's Digital Transformation</h2>
-                <p className="text-white/50 text-sm max-w-2xl mx-auto">Ukraine is building the world's first Technological Republic. This project connects distributed systems engineering to that vision — the same principles that make ad selection fast make democratic governance resilient.</p>
-                <p className="mt-4 text-sm italic" style={{ color: C.gold }}>Slava Ukraini! Heroiam slava!</p>
+                <p className="font-mono text-xs tracking-wider mb-2" style={{ color: C.gold }}>PROJECT BULAVA</p>
+                <h2 className="text-2xl md:text-3xl font-bold text-white mb-3">LLM-Augmented Ukraine Advocacy Engine</h2>
+                <p className="text-white/50 text-sm max-w-2xl mx-auto mb-2">Every winning ad carries a contextual Ukraine message. Three-tier architecture ensures zero latency impact on the core pipeline while transforming ad delivery into advocacy.</p>
+                <p className="text-sm italic" style={{ color: C.gold }}>Slava Ukraini! Heroiam slava!</p>
+              </div>
+
+              {/* Three-Tier Architecture */}
+              <div className="rounded-xl p-5 border" style={{ background: C.cardBg, borderColor: C.cardBorder }}>
+                <h3 className="text-white text-sm font-medium mb-4 flex items-center gap-2">
+                  <Layers className="w-4 h-4" style={{ color: C.blue }} /> Three-Tier Augmentation Architecture
+                </h3>
+                <p className="text-white/40 text-xs mb-4">Cascading tiers ensure every ad gets augmented — from pre-computed LLM responses to instant template fallback. Zero impact on bid selection latency.</p>
+                <div className="grid md:grid-cols-3 gap-4">
+                  {[
+                    {
+                      tier: "1", name: "Speculative Pre-Cache", color: "#10b981", latency: "<1ms lookup",
+                      desc: "Pre-generated LLM augmentations cached in DynamoDB DAX. When an ad category hits cache, the augmentation is a sub-millisecond lookup.",
+                      detail: "GPT generates augmentations offline for common ad_category + content_category pairs. DAX provides microsecond reads.",
+                      status: "Architecture Designed"
+                    },
+                    {
+                      tier: "2", name: "Micro-LLM Sidecar", color: "#f59e0b", latency: "50-100ms",
+                      desc: "On cache miss, a 2B-parameter distilled model generates real-time augmentations. Runs as a Lambda Extension sidecar.",
+                      detail: "Runs in parallel with I/O phase using spare CPU cycles. Non-blocking — never delays the response.",
+                      status: "Architecture Designed"
+                    },
+                    {
+                      tier: "3", name: "Template Fallback", color: C.gold, latency: "<0.01ms",
+                      desc: "Pre-written templates keyed by ad category. Instant lookup, zero computation. The safety net that ensures 100% augmentation rate.",
+                      detail: "9 ad categories × 5 augmentation types = 45 hand-crafted messages. Active in this demo.",
+                      status: "LIVE"
+                    },
+                  ].map((t) => (
+                    <div key={t.tier} className="rounded-xl p-4 border relative overflow-hidden" style={{ background: C.cardBg, borderColor: `${t.color}25` }}>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white" style={{ background: t.color }}>T{t.tier}</span>
+                          <span className="text-white text-xs font-medium">{t.name}</span>
+                        </div>
+                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${t.status === "LIVE" ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20" : "bg-white/5 text-white/30 border border-white/5"}`}>{t.status}</span>
+                      </div>
+                      <p className="text-white/50 text-xs mb-2">{t.desc}</p>
+                      <p className="text-white/30 text-[10px] mb-2">{t.detail}</p>
+                      <div className="flex items-center gap-1.5 pt-2 border-t border-white/5">
+                        <Clock className="w-3 h-3" style={{ color: t.color }} />
+                        <span className="font-mono text-[10px]" style={{ color: t.color }}>{t.latency}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Pipeline Integration Diagram */}
+              <div className="rounded-xl p-5 border" style={{ background: `${C.blue}06`, borderColor: `${C.blue}15` }}>
+                <h3 className="text-white text-sm font-medium mb-3">Pipeline Integration (Zero Latency Impact)</h3>
+                <p className="text-white/40 text-xs mb-4">Bulava augments AFTER bid selection. The Lambda's core scoring and I/O paths are completely untouched.</p>
+                <div className="flex flex-col md:flex-row items-center gap-3 text-center">
+                  {[
+                    { label: "SQS Input", sub: "Ad Opportunities", color: "#f59e0b", w: "flex-1" },
+                    { label: "Lambda: Score & Select", sub: "Core Pipeline (UNTOUCHED)", color: C.blue, w: "flex-[2]" },
+                    { label: "Bulava Augment", sub: "Tier 3 Template Lookup", color: C.gold, w: "flex-1" },
+                    { label: "SQS + DynamoDB", sub: "Augmented Results", color: "#10b981", w: "flex-1" },
+                  ].map((n, i) => (
+                    <div key={i} className="flex items-center gap-3 w-full md:w-auto" style={{ flex: n.w === "flex-[2]" ? 2 : 1 }}>
+                      <div className="flex-1 rounded-lg p-3 border" style={{ background: `${n.color}08`, borderColor: `${n.color}25` }}>
+                        <p className="text-white text-[11px] font-medium">{n.label}</p>
+                        <p className="text-[9px] mt-0.5" style={{ color: `${n.color}` }}>{n.sub}</p>
+                      </div>
+                      {i < 3 && <ArrowRight className="hidden md:block w-4 h-4 text-white/10 flex-shrink-0" />}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Interactive Demo */}
+              <div className="rounded-xl p-5 border" style={{ background: C.cardBg, borderColor: `${C.gold}20` }}>
+                <h3 className="text-white text-sm font-medium mb-4 flex items-center gap-2">
+                  <Play className="w-4 h-4" style={{ color: C.gold }} /> Live Augmentation Demo (Tier 3)
+                </h3>
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-white/40 text-[10px] uppercase tracking-wider mb-1 block">Ad Category</label>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {["sportswear", "fintech", "energy_drink", "streaming", "gaming", "insurance", "beauty", "travel", "fast_food"].map((cat) => (
+                          <button
+                            key={cat}
+                            onClick={() => setBulavaCategory(cat)}
+                            className={`px-2 py-1.5 rounded text-[10px] font-medium transition-all ${bulavaCategory === cat ? "text-white" : "text-white/30 hover:text-white/50"}`}
+                            style={bulavaCategory === cat ? { background: C.blue } : { background: "rgba(255,255,255,0.03)" }}
+                          >
+                            {cat.replace("_", " ")}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-white/40 text-[10px] uppercase tracking-wider mb-1 block">Augmentation Type</label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {["fact", "product_parallel", "call_to_action", "cultural", "inspiration"].map((t) => (
+                          <button
+                            key={t}
+                            onClick={() => setBulavaType(t)}
+                            className={`px-2.5 py-1 rounded text-[10px] font-medium transition-all ${bulavaType === t ? "text-[#1A1A2E]" : "text-white/30 hover:text-white/50"}`}
+                            style={bulavaType === t ? { background: C.gold } : { background: "rgba(255,255,255,0.03)" }}
+                          >
+                            {t.replace(/_/g, " ")}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <button
+                      onClick={generateBulavaAugmentation}
+                      className="w-full py-2.5 rounded-lg text-xs font-medium text-white transition-all hover:opacity-90"
+                      style={{ background: C.blue }}
+                      data-testid="bulava-generate-btn"
+                    >
+                      <Zap className="w-3.5 h-3.5 inline mr-1" /> Generate Augmentation
+                    </button>
+                  </div>
+                  <div>
+                    {bulavaDemo ? (
+                      <div className="rounded-xl p-4 h-full" style={{ background: `${C.gold}08`, border: `1px solid ${C.gold}20` }}>
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <Flag className="w-3.5 h-3.5" style={{ color: C.gold }} />
+                            <span className="text-white/50 text-[10px] uppercase tracking-wider">Ukraine Message</span>
+                          </div>
+                          <span className="text-[9px] font-mono" style={{ color: C.gold }}>Tier {bulavaDemo.tier} | {bulavaDemo.latency_ms}ms</span>
+                        </div>
+                        <p className="text-white/80 text-sm leading-relaxed mt-2">{bulavaDemo.text}</p>
+                        <div className="flex items-center gap-2 mt-3 pt-2 border-t border-white/5">
+                          <span className="px-1.5 py-0.5 rounded text-[9px] bg-white/5 text-white/40">{bulavaDemo.ad_category}</span>
+                          <span className="px-1.5 py-0.5 rounded text-[9px]" style={{ background: `${C.gold}15`, color: C.gold }}>{bulavaDemo.type}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-xl p-4 h-full flex items-center justify-center border border-dashed" style={{ borderColor: `${C.gold}20` }}>
+                        <p className="text-white/20 text-xs">Select a category and type, then generate</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Batch Demo */}
+              <div className="rounded-xl p-5 border" style={{ background: C.cardBg, borderColor: C.cardBorder }}>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-white text-sm font-medium flex items-center gap-2">
+                    <BarChart3 className="w-4 h-4" style={{ color: C.blue }} /> Batch Augmentation Simulation
+                  </h3>
+                  <button onClick={runBulavaBatchDemo} className="px-3 py-1.5 rounded-lg text-[10px] font-medium transition-all hover:opacity-90 text-white" style={{ background: C.blue }} data-testid="bulava-batch-btn">
+                    Run 20-Ad Batch
+                  </button>
+                </div>
+                {bulavaBatch ? (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      <div className="rounded-lg p-3 text-center" style={{ background: `${C.blue}08` }}>
+                        <p className="text-xl font-bold" style={{ color: C.blue }}>{bulavaBatch.count}</p>
+                        <p className="text-white/40 text-[10px]">Ads Augmented</p>
+                      </div>
+                      <div className="rounded-lg p-3 text-center" style={{ background: `${C.gold}08` }}>
+                        <p className="text-xl font-bold" style={{ color: C.gold }}>100%</p>
+                        <p className="text-white/40 text-[10px]">Augmentation Rate</p>
+                      </div>
+                      <div className="rounded-lg p-3 text-center bg-emerald-500/5">
+                        <p className="text-xl font-bold text-emerald-400">0ms</p>
+                        <p className="text-white/40 text-[10px]">Added Latency</p>
+                      </div>
+                      <div className="rounded-lg p-3 text-center bg-white/[0.03]">
+                        <p className="text-xl font-bold text-white/80">{Object.keys(bulavaBatch.type_distribution).length}</p>
+                        <p className="text-white/40 text-[10px]">Message Types Used</p>
+                      </div>
+                    </div>
+                    <div className="grid md:grid-cols-2 gap-2">
+                      <div className="rounded-lg p-3 bg-white/[0.02]">
+                        <p className="text-white/40 text-[10px] uppercase tracking-wider mb-2">Type Distribution</p>
+                        {Object.entries(bulavaBatch.type_distribution).map(([type, count]) => (
+                          <div key={type} className="flex items-center justify-between text-xs py-0.5">
+                            <span className="text-white/50">{type.replace(/_/g, " ")}</span>
+                            <div className="flex items-center gap-2">
+                              <div className="w-16 h-1 rounded-full bg-white/5"><div className="h-1 rounded-full" style={{ width: `${(count / bulavaBatch.count) * 100}%`, background: C.gold }} /></div>
+                              <span className="text-white/30 font-mono w-6 text-right">{count}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="rounded-lg p-3 bg-white/[0.02]">
+                        <p className="text-white/40 text-[10px] uppercase tracking-wider mb-2">Sample Augmentations</p>
+                        <div className="space-y-2 max-h-32 overflow-y-auto">
+                          {bulavaBatch.results.slice(0, 5).map((r, i) => (
+                            <div key={i} className="text-[10px]">
+                              <span className="px-1 py-0.5 rounded" style={{ background: `${C.gold}15`, color: C.gold }}>{r.ad_category.replace("_", " ")}</span>
+                              <p className="text-white/40 mt-0.5 leading-relaxed">{r.augmentation}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-white/20 text-xs text-center py-4">Click "Run 20-Ad Batch" to see Bulava augment a batch of ads.</p>
+                )}
               </div>
 
               {/* Diia Platform */}
               <div className="rounded-xl p-5 border" style={{ background: C.cardBg, borderColor: C.cardBorder }}>
                 <h3 className="text-white text-sm font-medium mb-3 flex items-center gap-2">
-                  <Globe className="w-4 h-4" style={{ color: C.blue }} /> The Diia Platform
+                  <Globe className="w-4 h-4" style={{ color: C.blue }} /> The Diia Platform — Ukraine's Digital Foundation
                 </h3>
-                <p className="text-white/50 text-sm mb-4">Ukraine's digital government platform — the most ambitious e-governance system built during wartime.</p>
                 <div className="grid grid-cols-3 gap-3 mb-4">
                   {[
                     { stat: "26M+", label: "Active users" },
@@ -1295,32 +1522,20 @@ function App() {
                     </div>
                   ))}
                 </div>
-                <p className="text-white/40 text-xs leading-relaxed">Diia embodies the principle of subsidiarity — information distributed for the citizen's empowerment, not centralized for the state's convenience. The UISSS connects 40 registries to provide real-time benefit determination. Its microservices architecture (Liquio/NestJS/MongoDB) mirrors the same distributed principles powering this AdFlow pipeline.</p>
-              </div>
-
-              {/* Palantir & Ukraine */}
-              <div className="rounded-xl p-5 border" style={{ background: C.cardBg, borderColor: C.cardBorder }}>
-                <h3 className="text-white text-sm font-medium mb-3 flex items-center gap-2">
-                  <Shield className="w-4 h-4" style={{ color: C.gold }} /> Palantir & Ukraine
-                </h3>
-                <div className="space-y-3 text-sm text-white/50">
-                  <p><strong className="text-white/70">GRIT Platform:</strong> Humanitarian demining powered by Palantir's Ontology, coordinating HALO Trust and Danish Demining Group operations across Ukraine's contaminated territory.</p>
-                  <p><strong className="text-white/70">Brave1:</strong> Defense innovation cluster integrating private-sector technology solutions with Ukraine's military operations through rapid procurement and testing frameworks.</p>
-                  <p><strong className="text-white/70">Project Bulava:</strong> Deep integration of Palantir's Foundry with Ukraine's digital infrastructure — transforming how a democratic nation at war processes information, allocates resources, and defends its citizens.</p>
-                </div>
+                <p className="text-white/40 text-xs leading-relaxed">Diia embodies subsidiarity — information distributed for the citizen's empowerment. The UISSS connects 40 registries for real-time benefit determination. Its architecture (Liquio/NestJS/MongoDB) mirrors the same distributed principles powering AdFlow.</p>
               </div>
 
               {/* Distributed Systems Connection */}
-              <div className="rounded-xl p-5 border" style={{ background: `${C.blue}08`, borderColor: `${C.blue}20` }}>
+              <div className="rounded-xl p-5 border" style={{ background: `${C.blue}06`, borderColor: `${C.blue}15` }}>
                 <h3 className="text-white text-sm font-medium mb-3">The Distributed Systems Connection</h3>
                 <div className="grid md:grid-cols-2 gap-4">
                   <div>
                     <p className="text-white/50 text-[10px] uppercase tracking-wider mb-2" style={{ color: C.blue }}>AdFlow Pipeline</p>
                     <div className="space-y-1.5 text-xs text-white/50">
-                      <p>• Queue-based message processing (no single point of failure)</p>
+                      <p>• Queue-based processing (no single point of failure)</p>
                       <p>• Lambda functions scale independently</p>
                       <p>• DynamoDB for resilient data persistence</p>
-                      <p>• Event-driven, serverless architecture</p>
+                      <p>• Event-driven serverless architecture</p>
                     </div>
                   </div>
                   <div>
@@ -1339,11 +1554,10 @@ function App() {
               {/* NCF-Ukraine Partnership */}
               <div className="rounded-xl p-5 border" style={{ background: C.cardBg, borderColor: C.cardBorder }}>
                 <h3 className="text-white text-sm font-medium mb-3">NCF-Ukraine Partnership Vision</h3>
-                <p className="text-white/50 text-xs mb-4">A three-lane outreach strategy for academic collaboration between New College of Florida and Ukrainian institutions:</p>
                 <div className="grid md:grid-cols-3 gap-3 mb-4">
                   {[
                     { lane: "A", title: "Direct Ministry", desc: "Contact Ukraine's Ministry of Digital Transformation for a GovTech pilot project sponsor", color: C.blue },
-                    { lane: "B", title: "FSU Bridge", desc: "Leverage the established FSU Ukraine Task Force as intermediary to vetted academic partners", color: C.gold },
+                    { lane: "B", title: "FSU Bridge", desc: "Leverage the FSU Ukraine Task Force as intermediary to vetted academic partners", color: C.gold },
                     { lane: "C", title: "Kyiv-Mohyla Academy", desc: "Co-sponsored project through NaUKMA's international cooperation office", color: "#10b981" },
                   ].map((l) => (
                     <div key={l.lane} className="rounded-lg p-3 border border-white/5 bg-white/[0.02]">
@@ -1358,9 +1572,9 @@ function App() {
                 <h4 className="text-white/50 text-xs font-medium mb-2">Candidate Project Concepts</h4>
                 <div className="space-y-2">
                   {[
-                    { name: "Civic Service Delivery Analytics", desc: "Dashboard using data.gov.ua open datasets for service access and equity comparisons across regions" },
-                    { name: "Digital Literacy Pathway Evaluation", desc: "Model where upskilling interventions have highest payoff using Diia.Education data" },
-                    { name: "GovTech Platform Adoption Analytics", desc: "Evaluate Diia.Engine adoption patterns and propose evidence-based UX improvements" },
+                    { name: "Civic Service Delivery Analytics", desc: "Dashboard using data.gov.ua open datasets for service access and equity comparisons" },
+                    { name: "Digital Literacy Pathway Evaluation", desc: "Model upskilling interventions using Diia.Education data" },
+                    { name: "GovTech Platform Adoption Analytics", desc: "Evaluate Diia.Engine adoption patterns for evidence-based UX improvements" },
                   ].map((p, i) => (
                     <div key={i} className="flex items-start gap-2 text-xs">
                       <Star className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" style={{ color: C.gold }} />
@@ -1375,8 +1589,8 @@ function App() {
 
               {/* Call to Action */}
               <div className="rounded-xl p-6 text-center" style={{ background: `linear-gradient(135deg, ${C.gold}10, ${C.blue}08)`, border: `1px solid ${C.gold}20` }}>
-                <p className="text-white/60 text-sm mb-4">If you work in Ukraine's digital ecosystem, build AI for democratic governance at Palantir or Deloitte, or want to join the NCF-Ukraine partnership — let's connect.</p>
-                <a href="mailto:matthew.macfarlane27@ncf.edu" className="inline-flex items-center gap-2 px-5 py-2 rounded-full text-sm font-medium transition-all hover:opacity-90" style={{ background: C.gold, color: C.dark }} data-testid="ukraine-cta-email">
+                <p className="text-white/60 text-sm mb-4">If you work in Ukraine's digital ecosystem, build AI for democratic governance, or want to join the NCF-Ukraine partnership — let's connect.</p>
+                <a href="mailto:matthew.macfarlane27@ncf.edu" className="inline-flex items-center gap-2 px-5 py-2 rounded-full text-sm font-medium transition-all hover:opacity-90" style={{ background: C.gold, color: C.dark }} data-testid="bulava-cta-email">
                   <Mail className="w-4 h-4" /> matthew.macfarlane27@ncf.edu
                 </a>
               </div>
