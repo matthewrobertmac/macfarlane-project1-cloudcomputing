@@ -12,7 +12,7 @@ import json
 import random
 import time
 import statistics
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import boto3
 from concurrent.futures import ThreadPoolExecutor
 import asyncio
@@ -372,8 +372,7 @@ def generate_simulated_results(count: int) -> TestResponse:
         latencies=latencies[:100]
     )
 
-# Include the router in the main app
-app.include_router(api_router)
+# Include the router in the main app (moved to end of file after all routes defined)
 
 app.add_middleware(
     CORSMiddleware,
@@ -386,3 +385,188 @@ app.add_middleware(
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
+
+# ============================================================================
+# AUTO-SCALING PROVISIONED CONCURRENCY
+# Scales PC based on user activity on the frontend
+# ============================================================================
+
+LAMBDA_FUNCTION_NAME = f"adflow-{STUDENT_ID}-worker"
+PC_ACTIVE = 10      # Provisioned concurrency when users active
+PC_IDLE = 0         # Provisioned concurrency when idle
+IDLE_TIMEOUT_MINUTES = 5  # Scale down after this many minutes of inactivity
+
+# Store last activity time
+_last_activity = {"timestamp": None, "current_pc": 0}
+
+def get_lambda_client():
+    """Get Lambda client for PC management."""
+    try:
+        return boto3.client(
+            "lambda",
+            region_name=AWS_REGION,
+            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", "AKIA33UF7HJBOVUWZML7"),
+            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", "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")
+        )
+    except Exception as e:
+        logger.error(f"Failed to create Lambda client: {e}")
+        return None
+
+async def set_provisioned_concurrency(count: int):
+    """Set provisioned concurrency for the Lambda function."""
+    lambda_client = get_lambda_client()
+    if not lambda_client:
+        return {"success": False, "message": "Failed to connect to AWS"}
+    
+    try:
+        if count > 0:
+            # First, publish a new version
+            version_response = lambda_client.publish_version(
+                FunctionName=LAMBDA_FUNCTION_NAME,
+                Description=f"Auto-scaled PC version at {datetime.now(timezone.utc).isoformat()}"
+            )
+            version = version_response['Version']
+            
+            # Set provisioned concurrency on this version
+            lambda_client.put_provisioned_concurrency_config(
+                FunctionName=LAMBDA_FUNCTION_NAME,
+                Qualifier=version,
+                ProvisionedConcurrentExecutions=count
+            )
+            _last_activity["current_pc"] = count
+            logger.info(f"Set provisioned concurrency to {count} on version {version}")
+            return {"success": True, "message": f"PC set to {count}", "version": version}
+        else:
+            # Delete all provisioned concurrency configs
+            try:
+                # List all versions and delete PC configs
+                paginator = lambda_client.get_paginator('list_versions_by_function')
+                for page in paginator.paginate(FunctionName=LAMBDA_FUNCTION_NAME):
+                    for version in page['Versions']:
+                        if version['Version'] != '$LATEST':
+                            try:
+                                lambda_client.delete_provisioned_concurrency_config(
+                                    FunctionName=LAMBDA_FUNCTION_NAME,
+                                    Qualifier=version['Version']
+                                )
+                            except lambda_client.exceptions.ProvisionedConcurrencyConfigNotFoundException:
+                                pass
+            except Exception as e:
+                logger.warning(f"Error cleaning up PC configs: {e}")
+            
+            _last_activity["current_pc"] = 0
+            logger.info("Provisioned concurrency disabled")
+            return {"success": True, "message": "PC disabled"}
+    except Exception as e:
+        logger.error(f"Failed to set PC: {e}")
+        return {"success": False, "message": str(e)}
+
+class HeartbeatResponse(BaseModel):
+    received: bool
+    timestamp: str
+    provisioned_concurrency: int
+    status: str
+
+class PCStatusResponse(BaseModel):
+    current_pc: int
+    target_pc: int
+    last_activity: Optional[str]
+    minutes_since_activity: Optional[float]
+    status: str
+
+@api_router.post("/heartbeat", response_model=HeartbeatResponse)
+async def user_heartbeat():
+    """
+    Frontend calls this every 30 seconds when a user is active.
+    Triggers scale-up of provisioned concurrency if needed.
+    """
+    now = datetime.now(timezone.utc)
+    _last_activity["timestamp"] = now
+    
+    # Check if we need to scale up
+    current_pc = _last_activity.get("current_pc", 0)
+    status = "already_warm"
+    
+    if current_pc < PC_ACTIVE:
+        # Scale up asynchronously (don't block the response)
+        asyncio.create_task(scale_up_pc())
+        status = "scaling_up"
+    
+    return HeartbeatResponse(
+        received=True,
+        timestamp=now.isoformat(),
+        provisioned_concurrency=current_pc,
+        status=status
+    )
+
+async def scale_up_pc():
+    """Scale up provisioned concurrency."""
+    logger.info("Scaling up provisioned concurrency...")
+    result = await set_provisioned_concurrency(PC_ACTIVE)
+    logger.info(f"Scale up result: {result}")
+
+@api_router.post("/scale-down")
+async def scale_down_pc():
+    """
+    Manually scale down provisioned concurrency.
+    Can also be called by a scheduled task.
+    """
+    result = await set_provisioned_concurrency(PC_IDLE)
+    return result
+
+@api_router.get("/pc-status", response_model=PCStatusResponse)
+async def get_pc_status():
+    """Get current provisioned concurrency status."""
+    now = datetime.now(timezone.utc)
+    last_ts = _last_activity.get("timestamp")
+    
+    minutes_since = None
+    if last_ts:
+        minutes_since = (now - last_ts).total_seconds() / 60
+    
+    current_pc = _last_activity.get("current_pc", 0)
+    
+    # Determine target PC based on activity
+    if last_ts and minutes_since and minutes_since < IDLE_TIMEOUT_MINUTES:
+        target_pc = PC_ACTIVE
+        status = "active"
+    else:
+        target_pc = PC_IDLE
+        status = "idle"
+    
+    return PCStatusResponse(
+        current_pc=current_pc,
+        target_pc=target_pc,
+        last_activity=last_ts.isoformat() if last_ts else None,
+        minutes_since_activity=round(minutes_since, 2) if minutes_since else None,
+        status=status
+    )
+
+@api_router.post("/check-idle")
+async def check_and_scale_down():
+    """
+    Check if users have been idle and scale down if needed.
+    Call this from a scheduled task every minute.
+    """
+    now = datetime.now(timezone.utc)
+    last_ts = _last_activity.get("timestamp")
+    current_pc = _last_activity.get("current_pc", 0)
+    
+    if not last_ts:
+        return {"action": "none", "reason": "no_activity_recorded"}
+    
+    minutes_since = (now - last_ts).total_seconds() / 60
+    
+    if minutes_since >= IDLE_TIMEOUT_MINUTES and current_pc > 0:
+        # Scale down
+        result = await set_provisioned_concurrency(PC_IDLE)
+        return {"action": "scaled_down", "minutes_idle": round(minutes_since, 2), "result": result}
+    elif minutes_since < IDLE_TIMEOUT_MINUTES:
+        return {"action": "none", "reason": "users_still_active", "minutes_since": round(minutes_since, 2)}
+    else:
+        return {"action": "none", "reason": "already_scaled_down"}
+
+
+# Include the router in the main app (after all routes are defined)
+app.include_router(api_router)

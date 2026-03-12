@@ -5,7 +5,8 @@ import {
   BarChart3, Code2, GraduationCap, MapPin, Calendar, BookOpen, Award,
   Play, Square, RefreshCw, Flame, Activity, Clock, TrendingUp, 
   CheckCircle2, AlertCircle, Cpu, FileText, User, Briefcase, Globe,
-  ChevronDown, ChevronUp, Target, Layers, Settings, Copy, Check, Terminal
+  ChevronDown, ChevronUp, Target, Layers, Settings, Copy, Check, Terminal,
+  Wifi, WifiOff, Gauge
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, Legend, AreaChart, Area } from 'recharts';
 
@@ -20,7 +21,47 @@ function App() {
   const [isWarmedUp, setIsWarmedUp] = useState(false);
   const [expandedSection, setExpandedSection] = useState(null);
   const [copiedCode, setCopiedCode] = useState(null);
+  const [pcStatus, setPcStatus] = useState({ current_pc: 0, status: 'unknown' });
   const testRef = useRef(null);
+
+  // Heartbeat to keep Lambda warm when user is active
+  useEffect(() => {
+    const sendHeartbeat = async () => {
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/heartbeat`, { method: 'POST' });
+        const data = await response.json();
+        setPcStatus(prev => ({ ...prev, current_pc: data.provisioned_concurrency, status: data.status }));
+      } catch (error) {
+        console.log('Heartbeat failed:', error);
+      }
+    };
+
+    // Send initial heartbeat
+    sendHeartbeat();
+    
+    // Send heartbeat every 30 seconds while user is on the page
+    const interval = setInterval(sendHeartbeat, 30000);
+    
+    // Cleanup on unmount
+    return () => clearInterval(interval);
+  }, []);
+
+  // Fetch PC status periodically
+  useEffect(() => {
+    const fetchPCStatus = async () => {
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/pc-status`);
+        const data = await response.json();
+        setPcStatus(data);
+      } catch (error) {
+        console.log('PC status fetch failed:', error);
+      }
+    };
+
+    fetchPCStatus();
+    const interval = setInterval(fetchPCStatus, 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Copy to clipboard function
   const copyToClipboard = (text, id) => {
@@ -334,6 +375,30 @@ output "lambda_function_name" {
                 <p className="text-emerald-400 font-mono text-sm">Machine Learning Engineer & Data Scientist</p>
               </div>
               <div className="flex items-center gap-3">
+                {/* Provisioned Concurrency Status Indicator */}
+                <div 
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all ${
+                    pcStatus.current_pc > 0 
+                      ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-400'
+                      : pcStatus.status === 'scaling_up'
+                      ? 'bg-amber-500/20 border-amber-500/30 text-amber-400 animate-pulse'
+                      : 'bg-white/5 border-white/10 text-white/50'
+                  }`}
+                  title={`Provisioned Concurrency: ${pcStatus.current_pc} instances`}
+                  data-testid="pc-status"
+                >
+                  {pcStatus.current_pc > 0 ? (
+                    <Wifi className="w-4 h-4" />
+                  ) : pcStatus.status === 'scaling_up' ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <WifiOff className="w-4 h-4" />
+                  )}
+                  <span className="text-xs font-medium">
+                    PC: {pcStatus.current_pc}
+                  </span>
+                </div>
+
                 <a href="https://github.com/mattmacf98" target="_blank" rel="noopener noreferrer" 
                    className="p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-all hover:scale-105" data-testid="github-link">
                   <Github className="w-5 h-5 text-white/80" />
