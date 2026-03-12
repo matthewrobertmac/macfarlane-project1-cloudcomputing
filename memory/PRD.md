@@ -10,51 +10,26 @@
 - **Semester**: Spring 2026
 
 ## Project Overview
-A serverless, distributed ad selection pipeline processing live auction streams at scale using AWS Lambda, SQS, and DynamoDB. Optimized for sub-100ms warm latency with Python 3.12, SnapStart, Provisioned Mode SQS, and low-level DynamoDB client.
+A serverless, distributed ad selection pipeline processing live auction streams at scale using AWS Lambda, SQS, and DynamoDB. Portfolio site with Ukrainian-themed design showcasing technical excellence, personal brand, and Ukraine partnership vision.
 
-## Portfolio Features
-**Live URL**: https://adflow-pipeline.preview.emergentagent.com
+## Live URL
+https://adflow-pipeline.preview.emergentagent.com
 
-### Tabs Implemented
-1. **Live Testing** - Interactive test profiles with real-time analytics, latency breakdown, bottleneck analysis, and historical test comparison
-2. **Architecture** - Professor's template vs optimized implementation comparison
-3. **Optimizations** - Three-tier optimization breakdown (Tier 1: High Impact, Tier 2: Medium, Tier 3: Micro)
-4. **Terraform** - Infrastructure as Code deployment with copyable code blocks
-5. **Course** - Course syllabus info, topics, weekly schedule
-6. **About Me** - Education, certifications, projects, contact info
+## Design System
+- **Primary Blue**: #005BBB (Ukrainian flag blue)
+- **Accent Gold**: #FFD500 (Ukrainian flag gold)
+- **Deep Dark**: #0f0f1a (backgrounds)
+- **Theme**: Professional dark with Ukrainian accents
 
-### Key Features
-- **Warm Up AWS Button** - Pre-provisions Lambda containers
-- **Live Latency Charts** - Real-time Recharts visualization
-- **Latency Breakdown by AWS Service** - Stacked bar + individual cards
-- **Bottleneck Analysis** - Primary bottleneck, concurrency status, recommendations
-- **Historical Test Comparison** - Save runs to MongoDB, overlay up to 4 runs
-- **Provisioned Concurrency Status** - Real-time PC indicator with heartbeat
-
-## Lambda Optimizations Applied (Ultra Performance Edition)
-
-### Tier 1 - High Impact
-| Optimization | Before | After | Impact |
-|---|---|---|---|
-| Python 3.12 + SnapStart | 3.11, ~200-500ms cold start | SnapStart restore ~30ms | 85% cold start reduction |
-| SQS Provisioned Mode | Standard polling ~150ms | Dedicated pollers ~20ms | 87% polling reduction |
-| Low-Level DDB Client | Resource + Decimal overhead | Direct batch_write_item, native format | 15-30% faster writes |
-| Eager Module-Level Init | Lazy imports on first use | Captured by SnapStart snapshot | Zero init on warm/restore |
-
-### Tier 2 - Medium Impact
-| Optimization | Impact |
-|---|---|
-| Parallel I/O (ThreadPoolExecutor) | 50-70% I/O faster |
-| Batch Operations (SQS + DDB) | 90% fewer API calls |
-| Connection Pooling (max_pool=10, tcp_keepalive) | Eliminates reconnect overhead |
-
-### Tier 3 - Micro
-| Optimization | Impact |
-|---|---|
-| orjson | 5-10x faster JSON |
-| ARM64/Graviton2 | 20% better price/perf |
-| 1769MB Memory | Full vCPU allocation |
-| O(1) Time Bonus Array | Pre-computed lookup |
+## Tabs (8 total)
+1. **Home** - Hero page with stats, bio strip, certification badges, Ukraine teaser
+2. **Live Testing** - Interactive test profiles, real-time analytics, latency breakdown, detailed bottleneck analysis, test history with like-test comparison and annotations
+3. **Architecture** - Pipeline diagram, scoring formula, AWS resource details
+4. **Optimizations** - Tier 1/2/3 structure (SnapStart, Provisioned Mode, low-level DDB, etc.)
+5. **Terraform** - Complete IaC with copyable code blocks
+6. **Course** - IDC5131 info, requirements coverage matrix
+7. **About Matt** - Narrative (West Point → Catholic U → Flatiron → NCF), 9 certifications, 5 projects, experience timeline
+8. **Ukraine** - Technological Republic, Diia Platform stats, Palantir/GRIT, distributed systems parallel, NCF-Ukraine partnership 3-lane strategy, candidate projects, CTA
 
 ## API Endpoints
 | Method | Path | Description |
@@ -64,37 +39,36 @@ A serverless, distributed ad selection pipeline processing live auction streams 
 | GET | /api/test-history | Get past test runs (limit 50) |
 | DELETE | /api/test-history/{id} | Delete specific run |
 | DELETE | /api/test-history | Clear all history |
+| PATCH | /api/test-history/{id}/annotate | Add/update annotation on test run |
 | POST | /api/heartbeat | Frontend heartbeat for PC auto-scaling |
 | GET | /api/pc-status | Get provisioned concurrency status |
 
-## Files Structure
-```
-/app/frontend/src/App.js     # React portfolio - 6 tabs, charts, history, tier optimization display
-/app/backend/server.py       # FastAPI - test, history, warmup, heartbeat, PC endpoints
-
-/app/DistributedForDataScienceF26/project1/student-starter/
-├── worker/lambda_handler.py  # ULTRA PERFORMANCE: Py3.12+SnapStart, low-level DDB, eager init
-├── template.yaml             # SAM: SnapStart, ProvisionedMode SQS, ARM64, 1769MB
-└── worker/tests/test_handler.py  # 8 tests (scoring, winner, batch processing)
-```
+## Lambda Optimizations (Ultra Performance Edition)
+- Python 3.12 + SnapStart (deployed)
+- SQS Provisioned Mode (deployed)
+- Low-Level DynamoDB Client (deployed)
+- ARM64/Graviton2, 1769MB, orjson
+- Parallel I/O, Batch Operations, Connection Pooling
 
 ## Completed Features (as of Feb 2026)
 - [x] Core Ad-Bidding Lambda Logic
-- [x] Performance Optimization - Tier 1/2/3 (Python 3.12, SnapStart, Provisioned Mode, low-level DDB, parallel I/O, batching, orjson, ARM64)
-- [x] Portfolio Frontend (6 tabs, interactive testing, charts)
-- [x] Backend API (FastAPI with all endpoints)
-- [x] Provisioned Concurrency Auto-Scaling (code-complete, blocked by AWS quota)
+- [x] Ultra Performance Lambda (Py3.12, SnapStart, Provisioned Mode, low-level DDB)
+- [x] Portfolio Frontend - Complete redesign with Ukrainian theme, 8 tabs
+- [x] Landing/Hero page with stats, CTAs
+- [x] About Matt with narrative, 9 certs, projects, experience
+- [x] Ukraine tab with Technological Republic, Diia, Palantir, partnership vision
+- [x] Latency Breakdown Visualization (stacked bar + service cards)
+- [x] Detailed Bottleneck Analysis (actionable recommendations)
+- [x] Historical Test Comparison (like-test filtering, annotations, overlay charts)
+- [x] Fixed GitHub/LinkedIn/Email links
+- [x] Responsive navigation with mobile hamburger menu
+- [x] Backend API (FastAPI with all endpoints including annotation)
 - [x] Terraform IaC tab
-- [x] Latency Breakdown Visualization
-- [x] Historical Test Comparison
-- [x] Ultra Performance Lambda Handler Rewrite
-- [x] Updated SAM Template (SnapStart + Provisioned Mode SQS)
+- [x] SAM deployed to AWS (Python 3.12 + SnapStart + Provisioned Mode)
 
-## Blocked / Pending
-- **P1**: Provisioned Concurrency deployment - blocked on AWS quota increase (requested 3000)
-- **P2**: Re-run burst tests after deploying Ultra Performance Edition
-
-## Next Steps
-1. `sam build && sam deploy --guided` to deploy Ultra Performance Edition
-2. Await AWS quota approval for Provisioned Concurrency
-3. Push to GitHub on `macfarlane` branch (use "Save to GitHub" button)
+## Phase 2 (Future)
+- [ ] Interactive scoring calculator (Architecture tab)
+- [ ] Animated SVG pipeline diagrams
+- [ ] CSV export for test results
+- [ ] Framer Motion page transitions
+- [ ] D3.js dependency graph for Terraform
