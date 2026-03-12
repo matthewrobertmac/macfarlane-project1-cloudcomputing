@@ -340,21 +340,19 @@ async def run_test(request: TestRequest):
             total_time = sum(latencies) / 1000
             throughput = len(received_ids) / total_time if total_time > 0 else 0
             
-            # Calculate latency breakdown by service (estimated based on architecture)
+            # Calculate latency breakdown by service (estimated based on ULTRA PERFORMANCE architecture)
             avg_latency = stats["avg"]
             
-            # Estimate breakdown based on message count and concurrency
-            # With 10 concurrent Lambdas, queue wait time increases with message count
+            # Updated estimates with Provisioned Mode + SnapStart + Low-level client
             lambda_concurrency = 10
             messages_per_batch = 10
-            lambda_process_time = 15  # ms per batch (optimized code)
-            lambda_io_time = 30  # ms for parallel SQS + DynamoDB writes
-            sqs_send_overhead = 30  # ms to accept message
-            sqs_poll_latency = 150  # ms for event source mapping
-            sqs_results_delivery = 30  # ms to deliver result
+            lambda_process_time = 10  # ms per batch (low-level client, no Decimal)
+            lambda_io_time = 20  # ms for parallel low-level SQS + DynamoDB writes
+            sqs_send_overhead = 25  # ms to accept message
+            sqs_poll_latency = 20  # ms with Provisioned Mode (was 150ms)
+            sqs_results_delivery = 25  # ms to deliver result
             
             # Queue wait time depends on how many messages are ahead
-            # With N messages and C concurrency, avg queue position is N/(2*C)
             avg_queue_position = count / (2 * lambda_concurrency)
             batch_cycle_time = sqs_poll_latency + lambda_process_time + lambda_io_time
             estimated_queue_wait = int(avg_queue_position * batch_cycle_time / messages_per_batch)

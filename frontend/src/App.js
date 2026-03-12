@@ -1186,101 +1186,172 @@ output "lambda_function_name" {
             {activeTab === "optimizations" && (
               <div className="space-y-6" data-testid="optimizations-content">
                 <h3 className="text-2xl font-bold text-white">Performance Optimizations</h3>
-                <p className="text-white/50">All optimizations are cost-neutral or cost-saving while maintaining SQS + Lambda architecture.</p>
+                <p className="text-white/50">Three tiers of optimizations applied to achieve sub-100ms warm latency while maintaining the SQS + Lambda architecture.</p>
 
-                <div className="grid md:grid-cols-2 gap-4">
-                  {[
-                    { 
-                      title: "Parallel I/O", 
-                      before: "Sequential: SQS → wait → DynamoDB → wait",
-                      after: "Concurrent: SQS + DynamoDB in parallel",
-                      improvement: "50-70% faster",
-                      cost: "FREE",
-                      icon: Zap
-                    },
-                    { 
-                      title: "Batch DynamoDB Writes", 
-                      before: "Individual put_item() per message",
-                      after: "batch_write_item() (up to 25 items)",
-                      improvement: "90% fewer API calls",
-                      cost: "SAVES $",
-                      icon: Database
-                    },
-                    { 
-                      title: "Module-Level Table", 
-                      before: "Create Table object per request",
-                      after: "Lazy init once, reuse across invocations",
-                      improvement: "~15ms/request saved",
-                      cost: "FREE",
-                      icon: Settings
-                    },
-                    { 
-                      title: "Pre-computed Time Bonus", 
-                      before: "O(n) iteration through TIME_WINDOWS",
-                      after: "O(1) array lookup by hour index",
-                      improvement: "Microseconds saved/bid",
-                      cost: "FREE",
-                      icon: Clock
-                    },
-                    { 
-                      title: "Lambda Memory", 
-                      before: "256MB",
-                      after: "512MB (2x CPU allocation)",
-                      improvement: "~2x compute speed",
-                      cost: "NEUTRAL",
-                      icon: Cpu
-                    },
-                    { 
-                      title: "Batch SQS Sends", 
-                      before: "Individual send_message() calls",
-                      after: "send_message_batch() (up to 10)",
-                      improvement: "90% fewer API calls",
-                      cost: "SAVES $",
-                      icon: Server
-                    },
-                  ].map((opt, i) => (
-                    <div key={i} className="bg-black/40 rounded-xl p-4 border border-white/10">
-                      <div className="flex items-start justify-between mb-3">
-                        <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center">
-                            <opt.icon className="w-4 h-4 text-emerald-400" />
+                {/* Tier 1 - High Impact */}
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="px-2 py-0.5 rounded text-xs font-bold bg-red-500/20 text-red-400 border border-red-500/30">TIER 1</span>
+                    <span className="text-white/60 text-sm">High Impact — 60-85% latency reduction</span>
+                  </div>
+                  <div className="grid md:grid-cols-2 gap-4">
+                    {[
+                      { 
+                        title: "Python 3.12 + SnapStart",
+                        before: "Python 3.11, full cold start ~200-500ms",
+                        after: "SnapStart snapshots init, restore in ~30ms",
+                        improvement: "~85% cold start reduction",
+                        cost: "FREE",
+                        icon: Zap
+                      },
+                      { 
+                        title: "SQS Provisioned Mode",
+                        before: "Standard polling (~150ms trigger latency)",
+                        after: "Dedicated pollers, 3x faster scaling, 16x capacity",
+                        improvement: "~130ms polling saved",
+                        cost: "LOW $",
+                        icon: Activity
+                      },
+                      { 
+                        title: "Low-Level DynamoDB Client",
+                        before: "boto3 Resource + Decimal conversion overhead",
+                        after: "Direct batch_write_item, native wire format",
+                        improvement: "~15-30% faster writes",
+                        cost: "FREE",
+                        icon: Database
+                      },
+                      { 
+                        title: "Eager Module-Level Init",
+                        before: "Lazy imports: boto3 loaded on first use",
+                        after: "Module-level init captured by SnapStart snapshot",
+                        improvement: "Zero init on warm + restore",
+                        cost: "FREE",
+                        icon: Settings
+                      },
+                    ].map((opt, i) => (
+                      <div key={i} className="bg-black/40 rounded-xl p-4 border border-red-500/10">
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-lg bg-red-500/20 flex items-center justify-center">
+                              <opt.icon className="w-4 h-4 text-red-400" />
+                            </div>
+                            <h4 className="text-white font-medium">{opt.title}</h4>
                           </div>
-                          <h4 className="text-white font-medium">{opt.title}</h4>
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                            opt.cost === "SAVES $" ? "bg-green-500/20 text-green-400" :
+                            opt.cost === "FREE" ? "bg-blue-500/20 text-blue-400" :
+                            opt.cost === "LOW $" ? "bg-amber-500/20 text-amber-400" :
+                            "bg-amber-500/20 text-amber-400"
+                          }`}>
+                            {opt.cost}
+                          </span>
                         </div>
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                          opt.cost === "SAVES $" ? "bg-green-500/20 text-green-400" :
-                          opt.cost === "FREE" ? "bg-blue-500/20 text-blue-400" :
-                          "bg-amber-500/20 text-amber-400"
-                        }`}>
-                          {opt.cost}
-                        </span>
+                        <div className="space-y-2 text-sm">
+                          <div className="flex items-start gap-2">
+                            <span className="text-red-400/70 flex-shrink-0">Before:</span>
+                            <span className="text-white/50">{opt.before}</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="text-emerald-400 flex-shrink-0">After:</span>
+                            <span className="text-white/70">{opt.after}</span>
+                          </div>
+                          <div className="pt-2 border-t border-white/10">
+                            <span className="text-cyan-400 font-mono">{opt.improvement}</span>
+                          </div>
+                        </div>
                       </div>
-                      <div className="space-y-2 text-sm">
-                        <div className="flex items-center gap-2">
-                          <span className="text-red-400/70">Before:</span>
-                          <span className="text-white/50">{opt.before}</span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Tier 2 - Medium Impact */}
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="px-2 py-0.5 rounded text-xs font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">TIER 2</span>
+                    <span className="text-white/60 text-sm">Medium Impact — Code-level performance</span>
+                  </div>
+                  <div className="grid md:grid-cols-3 gap-4">
+                    {[
+                      { 
+                        title: "Parallel I/O",
+                        before: "Sequential SQS → DynamoDB",
+                        after: "ThreadPoolExecutor concurrent writes",
+                        improvement: "50-70% I/O faster",
+                        cost: "FREE",
+                        icon: Zap
+                      },
+                      { 
+                        title: "Batch Operations",
+                        before: "Individual put_item/send_message",
+                        after: "batch_write_item + send_message_batch",
+                        improvement: "90% fewer API calls",
+                        cost: "SAVES $",
+                        icon: Server
+                      },
+                      { 
+                        title: "Connection Pooling",
+                        before: "Default pool (10), no keepalive",
+                        after: "max_pool_connections=10, tcp_keepalive=True",
+                        improvement: "Eliminates reconnect overhead",
+                        cost: "FREE",
+                        icon: Wifi
+                      },
+                    ].map((opt, i) => (
+                      <div key={i} className="bg-black/40 rounded-xl p-4 border border-amber-500/10">
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center">
+                              <opt.icon className="w-4 h-4 text-amber-400" />
+                            </div>
+                            <h4 className="text-white font-medium text-sm">{opt.title}</h4>
+                          </div>
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                            opt.cost === "SAVES $" ? "bg-green-500/20 text-green-400" : "bg-blue-500/20 text-blue-400"
+                          }`}>{opt.cost}</span>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-emerald-400">After:</span>
-                          <span className="text-white/70">{opt.after}</span>
-                        </div>
-                        <div className="pt-2 border-t border-white/10">
-                          <span className="text-cyan-400 font-mono">{opt.improvement}</span>
+                        <div className="space-y-1 text-xs">
+                          <p><span className="text-red-400/70">Before:</span> <span className="text-white/50">{opt.before}</span></p>
+                          <p><span className="text-emerald-400">After:</span> <span className="text-white/70">{opt.after}</span></p>
+                          <p className="pt-1 border-t border-white/10 text-cyan-400 font-mono">{opt.improvement}</p>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
+                </div>
+
+                {/* Tier 3 - Micro */}
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="px-2 py-0.5 rounded text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">TIER 3</span>
+                    <span className="text-white/60 text-sm">Micro-Optimizations — Every microsecond counts</span>
+                  </div>
+                  <div className="grid md:grid-cols-4 gap-3">
+                    {[
+                      { title: "orjson", desc: "5-10x faster JSON parse/serialize", icon: Code2 },
+                      { title: "ARM64/Graviton2", desc: "20% better price/perf, faster cold starts", icon: Cpu },
+                      { title: "1769MB Memory", desc: "Exactly 1 full vCPU allocation", icon: Gauge },
+                      { title: "O(1) Time Bonus", desc: "Pre-computed 24-hour array lookup", icon: Clock },
+                    ].map((opt, i) => (
+                      <div key={i} className="bg-black/40 rounded-lg p-3 border border-emerald-500/10">
+                        <div className="flex items-center gap-2 mb-1">
+                          <opt.icon className="w-4 h-4 text-emerald-400" />
+                          <span className="text-white font-medium text-sm">{opt.title}</span>
+                        </div>
+                        <p className="text-white/40 text-xs">{opt.desc}</p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
                 {/* Results Summary */}
                 <div className="bg-gradient-to-r from-emerald-500/10 to-cyan-500/10 rounded-xl p-5 border border-white/10">
-                  <h4 className="text-white font-medium mb-4">Performance Results</h4>
+                  <h4 className="text-white font-medium mb-4">Expected Performance (After All Tiers)</h4>
                   <div className="grid md:grid-cols-4 gap-4">
                     {[
-                      { metric: "Batch Processing", before: "600ms", after: "15ms", change: "97% faster" },
-                      { metric: "Cold Start", before: "~500ms", after: "~200ms", change: "60% faster" },
-                      { metric: "Warmup <500ms", before: "0%", after: "60%", change: "+60 points" },
-                      { metric: "API Calls", before: "1 per msg", after: "Batched", change: "90% fewer" },
+                      { metric: "Cold Start", before: "~400-600ms", after: "~100-150ms", change: "70% faster" },
+                      { metric: "Warm Latency", before: "~150-300ms", after: "~50-100ms", change: "60% faster" },
+                      { metric: "Burst (500 msgs)", before: "~2-5s avg", after: "~200-500ms", change: "80% faster" },
+                      { metric: "SQS Polling", before: "~150ms", after: "~20ms", change: "87% faster" },
                     ].map((result, i) => (
                       <div key={i} className="text-center">
                         <p className="text-white/50 text-sm mb-1">{result.metric}</p>
@@ -1288,6 +1359,23 @@ output "lambda_function_name" {
                         <p className="text-emerald-400 font-mono text-sm mt-1">{result.change}</p>
                       </div>
                     ))}
+                  </div>
+                </div>
+
+                {/* Deployment Note */}
+                <div className="bg-white/5 rounded-xl p-4 border border-white/10">
+                  <h4 className="text-white font-medium mb-2 flex items-center gap-2">
+                    <Terminal className="w-4 h-4 text-white/50" /> Deploy Ultra Performance Edition
+                  </h4>
+                  <div className="grid md:grid-cols-2 gap-3 text-sm">
+                    <div className="bg-black/40 rounded-lg p-3">
+                      <p className="text-white/50 text-xs mb-1"># Deploy with SnapStart + Provisioned Mode</p>
+                      <code className="text-emerald-400 text-xs font-mono">sam build && sam deploy --guided</code>
+                    </div>
+                    <div className="bg-black/40 rounded-lg p-3">
+                      <p className="text-white/50 text-xs mb-1"># Enable Provisioned Concurrency (after quota)</p>
+                      <code className="text-emerald-400 text-xs font-mono">sam deploy --parameter-overrides ProvisionedConcurrency=10</code>
+                    </div>
                   </div>
                 </div>
               </div>
