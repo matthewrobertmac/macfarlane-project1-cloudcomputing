@@ -1180,6 +1180,45 @@ function App() {
                 )}
               </div>
 
+              {/* Performance Timeline — Historical avg latency over time */}
+              {testHistory.length > 1 && (
+                <div className="rounded-xl p-5 border" style={{ background: C.cardBg, borderColor: C.cardBorder }} data-testid="performance-timeline">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-white text-sm font-medium flex items-center gap-2">
+                      <TrendingUp className="w-4 h-4" style={{ color: C.blue }} /> Performance Timeline
+                    </h4>
+                    <span className="text-white/20 text-xs">{testHistory.length} runs</span>
+                  </div>
+                  <div className="h-56">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={[...testHistory].reverse().map((r) => ({
+                        time: new Date(r.timestamp).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }),
+                        avg: r.stats.avg,
+                        p95: r.stats.p95,
+                        min: r.stats.min,
+                        profile: r.profile,
+                      }))}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#1a1a2e" />
+                        <XAxis dataKey="time" stroke="#444" fontSize={9} angle={-30} textAnchor="end" height={50} />
+                        <YAxis stroke="#444" fontSize={10} label={{ value: "ms", position: "insideTopLeft", fill: "#555", fontSize: 10 }} />
+                        <Tooltip
+                          contentStyle={{ backgroundColor: "#111", border: "1px solid #333", fontSize: 11 }}
+                          labelFormatter={(label, payload) => {
+                            const p = payload?.[0]?.payload;
+                            return p ? `${label} (${p.profile})` : label;
+                          }}
+                        />
+                        <Legend />
+                        <Line type="monotone" dataKey="avg" stroke={C.blue} strokeWidth={2} name="Avg" dot={{ r: 3, fill: C.blue }} />
+                        <Line type="monotone" dataKey="p95" stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="4 2" name="p95" dot={{ r: 2, fill: "#f59e0b" }} />
+                        <Line type="monotone" dataKey="min" stroke="#10b981" strokeWidth={1} strokeDasharray="2 2" name="Min" dot={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <p className="text-white/20 text-[10px] mt-2 text-center">Tracks optimization progress across all test runs. Lower is better.</p>
+                </div>
+              )}
+
               {/* Test Profiles Info */}
               <div className="rounded-xl p-4 border" style={{ background: C.cardBg, borderColor: C.cardBorder }}>
                 <h4 className="text-white text-sm font-medium mb-3">About These Tests (From Professor's Test Apparatus)</h4>

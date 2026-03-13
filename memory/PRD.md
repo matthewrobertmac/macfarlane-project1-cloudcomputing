@@ -27,8 +27,8 @@ Primary Blue: #005BBB | Accent Gold: #FFD500 | Dark: #0f0f1a
 | Method | Path | Description |
 |---|---|---|
 | POST | /api/warmup | Warm up Lambda |
-| POST | /api/test | Run performance test (legacy, blocking) |
-| GET | /api/test/stream?profile=X | **SSE streaming endpoint** — real-time results |
+| POST | /api/test | Run performance test (legacy) |
+| GET | /api/test/stream?profile=X | SSE streaming — real-time results |
 | GET | /api/test-history | Past runs |
 | DELETE | /api/test-history/{id} | Delete run |
 | DELETE | /api/test-history | Clear all |
@@ -53,9 +53,10 @@ Primary Blue: #005BBB | Accent Gold: #FFD500 | Dark: #0f0f1a
 - [x] SSE Real-Time Result Streaming (Feb 2026)
 - [x] CSV Export for test results and history (Feb 2026)
 - [x] Framer Motion page transitions on all 8 tabs (Feb 2026)
-- [x] Interactive Scoring Formula Calculator on Architecture tab (Feb 2026)
+- [x] Interactive Scoring Formula Calculator (Feb 2026)
+- [x] Performance Timeline — historical avg/p95/min latency chart (Feb 2026)
 
-## Phase 2 (Future)
-- [ ] Tier 1: DynamoDB DAX speculative cache
-- [ ] Tier 2: Micro-LLM sidecar
+## Future
+- [ ] Tier 1: DynamoDB DAX speculative cache (Bulava)
+- [ ] Tier 2: Micro-LLM sidecar (Bulava)
 - [ ] Re-run burst tests with Provisioned Concurrency (after AWS quota approval)
