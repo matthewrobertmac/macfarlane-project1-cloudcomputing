@@ -23,8 +23,6 @@ Primary Blue: #005BBB | Accent Gold: #FFD500 | Dark: #0f0f1a
 | 2 | Micro-LLM Sidecar | 50-100ms | Designed |
 | 3 | Template Fallback (45 msgs) | <0.01ms | LIVE |
 
-**Bulava Analytics Dashboard**: Tracks augmentation usage by category (horizontal bar chart) and message type (donut chart). Shows total augmentations, categories reached, top category, top type. Updates in real-time after each augmentation.
-
 ## API Endpoints
 | Method | Path | Description |
 |---|---|---|
@@ -52,10 +50,12 @@ Primary Blue: #005BBB | Accent Gold: #FFD500 | Dark: #0f0f1a
 - [x] Bulava Analytics Dashboard (category/type charts, totals)
 - [x] Diia stats, NCF-Ukraine partnership, CTA
 - [x] Terraform IaC + SAM deployed to AWS
-- [x] **SSE Real-Time Result Streaming** (Feb 2026) — Results stream to frontend as they arrive from SQS, with live progress bar and incremental chart updates
+- [x] SSE Real-Time Result Streaming (Feb 2026)
+- [x] CSV Export for test results and history (Feb 2026)
+- [x] Framer Motion page transitions on all 8 tabs (Feb 2026)
+- [x] Interactive Scoring Formula Calculator on Architecture tab (Feb 2026)
 
 ## Phase 2 (Future)
 - [ ] Tier 1: DynamoDB DAX speculative cache
 - [ ] Tier 2: Micro-LLM sidecar
-- [ ] Interactive scoring calculator
-- [ ] CSV export, Framer Motion transitions
+- [ ] Re-run burst tests with Provisioned Concurrency (after AWS quota approval)
