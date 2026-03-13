@@ -1,4 +1,5 @@
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, Request
+from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -562,6 +563,246 @@ def generate_simulated_results(count: int) -> TestResponse:
         throughput=round(count / (sum(latencies) / 1000), 1),
         latencies=latencies[:100]
     )
+
+
+# ============================================================================
+# SSE STREAMING TEST ENDPOINT — Real-time result delivery
+# ============================================================================
+
+def _sse_event(event: str, data: dict) -> str:
+    """Format a Server-Sent Event."""
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+def _compute_latency_breakdown(stats, count):
+    """Compute latency breakdown by service. Extracted for reuse."""
+    avg_latency = stats["avg"]
+    if avg_latency == 0:
+        return None, None
+
+    lambda_concurrency = 10
+    messages_per_batch = 10
+    lambda_process_time = 10
+    lambda_io_time = 20
+    sqs_send_overhead = 25
+    sqs_poll_latency = 20
+    sqs_results_delivery = 25
+
+    avg_queue_position = count / (2 * lambda_concurrency)
+    batch_cycle_time = sqs_poll_latency + lambda_process_time + lambda_io_time
+    estimated_queue_wait = int(avg_queue_position * batch_cycle_time / messages_per_batch)
+
+    total_estimated = sqs_send_overhead + estimated_queue_wait + sqs_poll_latency + lambda_process_time + lambda_io_time + sqs_results_delivery
+    scale_factor = avg_latency / total_estimated if total_estimated > 0 else 1
+
+    latency_breakdown = {
+        "sqs_input_accept": int(sqs_send_overhead * scale_factor),
+        "queue_wait_time": int(estimated_queue_wait * scale_factor),
+        "sqs_lambda_trigger": int(sqs_poll_latency * scale_factor),
+        "lambda_compute": int(lambda_process_time * scale_factor),
+        "lambda_io": int(lambda_io_time * scale_factor),
+        "sqs_results_delivery": int(sqs_results_delivery * scale_factor),
+    }
+
+    max_component = max(latency_breakdown.items(), key=lambda x: x[1])
+    bottleneck_name = max_component[0]
+    bottleneck_pct = int(max_component[1] / avg_latency * 100) if avg_latency > 0 else 0
+    is_concurrency_bottleneck = latency_breakdown["queue_wait_time"] > avg_latency * 0.4
+    throughput_val = stats.get("throughput", 0)
+
+    bottleneck_analysis = {
+        "primary_bottleneck": bottleneck_name,
+        "bottleneck_percentage": bottleneck_pct,
+        "is_concurrency_limited": is_concurrency_bottleneck,
+        "recommendation": "Increase Lambda concurrency" if is_concurrency_bottleneck else "Optimize Lambda code or use Provisioned Concurrency",
+        "estimated_latency_with_more_concurrency": int(avg_latency * 0.3) if is_concurrency_bottleneck else avg_latency,
+        "lambda_concurrency_used": lambda_concurrency,
+        "messages_per_second": round(throughput_val, 1),
+    }
+
+    return latency_breakdown, bottleneck_analysis
+
+
+@api_router.get("/test/stream")
+async def stream_test(profile: str = "warmup"):
+    """
+    SSE endpoint that streams test results in real-time.
+    Events: status, send_progress, result_batch, stats, complete
+    """
+    profile_config = TEST_PROFILES.get(profile, TEST_PROFILES["warmup"])
+    count = profile_config["count"]
+    delay_ms = profile_config["delay_ms"]
+
+    async def event_generator():
+        sqs = get_sqs_client()
+        if not sqs:
+            yield _sse_event("error", {"message": "Failed to connect to AWS"})
+            return
+
+        try:
+            random.seed(42)
+            send_times = {}
+            messages = [generate_opportunity() for _ in range(count)]
+
+            # Phase 1: Send messages to SQS
+            yield _sse_event("status", {"phase": "sending", "message": f"Sending {count} messages to SQS...", "total": count})
+
+            total_sent = 0
+            for i in range(0, len(messages), 10):
+                batch = messages[i:i + 10]
+                entries = [
+                    {"Id": str(idx), "MessageBody": json.dumps(msg)}
+                    for idx, msg in enumerate(batch)
+                ]
+
+                batch_send_time = int(time.time() * 1000)
+                sqs.send_message_batch(QueueUrl=INPUT_QUEUE_URL, Entries=entries)
+
+                for msg in batch:
+                    send_times[msg["opportunity_id"]] = batch_send_time
+
+                total_sent += len(batch)
+                yield _sse_event("send_progress", {"sent": total_sent, "total": count})
+
+                if delay_ms > 0 and i + 10 < len(messages):
+                    await asyncio.sleep(delay_ms / 1000)
+
+            # Phase 2: Poll for results and stream them
+            yield _sse_event("status", {"phase": "receiving", "message": "Collecting results from pipeline...", "total": count})
+
+            received_ids = set()
+            all_latencies = []
+            poll_start = time.time()
+            poll_timeout = 60
+            empty_polls = 0
+
+            while len(received_ids) < count and (time.time() - poll_start) < poll_timeout:
+                try:
+                    response = sqs.receive_message(
+                        QueueUrl=RESULTS_QUEUE_URL,
+                        MaxNumberOfMessages=10,
+                        WaitTimeSeconds=1
+                    )
+
+                    msgs = response.get("Messages", [])
+                    if not msgs:
+                        empty_polls += 1
+                        if empty_polls > 5 and len(received_ids) > 0:
+                            break
+                        continue
+
+                    empty_polls = 0
+                    receive_time = int(time.time() * 1000)
+                    batch_latencies = []
+
+                    for msg in msgs:
+                        try:
+                            body = json.loads(msg["Body"])
+                            opp_id = body.get("opportunity_id")
+
+                            if opp_id and opp_id not in received_ids:
+                                received_ids.add(opp_id)
+                                if opp_id in send_times:
+                                    latency = receive_time - send_times[opp_id]
+                                    all_latencies.append(latency)
+                                    batch_latencies.append(latency)
+
+                            sqs.delete_message(
+                                QueueUrl=RESULTS_QUEUE_URL,
+                                ReceiptHandle=msg["ReceiptHandle"]
+                            )
+                        except Exception:
+                            pass
+
+                    # Stream this batch of results
+                    if batch_latencies:
+                        yield _sse_event("result_batch", {
+                            "received": len(received_ids),
+                            "total": count,
+                            "new_latencies": [int(l) for l in batch_latencies],
+                            "batch_avg": int(statistics.mean(batch_latencies)),
+                        })
+
+                except Exception as e:
+                    logger.error(f"SSE poll error: {e}")
+
+                await asyncio.sleep(0.05)
+
+            # Phase 3: Compute and send final stats
+            if all_latencies:
+                sorted_latencies = sorted(all_latencies)
+                n = len(sorted_latencies)
+                total_time = sum(all_latencies) / 1000
+                throughput = len(received_ids) / total_time if total_time > 0 else 0
+
+                final_stats = {
+                    "min": int(sorted_latencies[0]),
+                    "avg": int(statistics.mean(all_latencies)),
+                    "median": int(sorted_latencies[n // 2]),
+                    "p95": int(sorted_latencies[int(n * 0.95)]) if n > 1 else int(sorted_latencies[0]),
+                    "max": int(sorted_latencies[-1]),
+                    "throughput": round(throughput, 1),
+                }
+
+                distribution = {
+                    "fast": len([l for l in all_latencies if l < 500]),
+                    "ok": len([l for l in all_latencies if 500 <= l < 1000]),
+                    "slow": len([l for l in all_latencies if l >= 1000]),
+                }
+
+                latency_breakdown, bottleneck_analysis = _compute_latency_breakdown(final_stats, count)
+
+                yield _sse_event("stats", {
+                    "stats": final_stats,
+                    "distribution": distribution,
+                    "latency_breakdown": latency_breakdown,
+                    "bottleneck_analysis": bottleneck_analysis,
+                })
+
+                # Save to history
+                history_entry = {
+                    "id": str(uuid.uuid4()),
+                    "profile": profile,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "sent": count,
+                    "received": len(received_ids),
+                    "stats": final_stats,
+                    "distribution": distribution,
+                    "throughput": round(throughput, 1),
+                    "latency_breakdown": latency_breakdown,
+                    "bottleneck_analysis": bottleneck_analysis,
+                }
+                await db.test_history.insert_one(history_entry)
+
+                yield _sse_event("complete", {
+                    "sent": count,
+                    "received": len(received_ids),
+                    "throughput": round(throughput, 1),
+                    "latencies": [int(l) for l in all_latencies[:100]],
+                })
+            else:
+                yield _sse_event("complete", {
+                    "sent": count,
+                    "received": 0,
+                    "throughput": 0,
+                    "latencies": [],
+                })
+
+        except Exception as e:
+            logger.error(f"SSE stream failed: {e}")
+            yield _sse_event("error", {"message": str(e)})
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 
 # Include the router in the main app (moved to end of file after all routes defined)
 

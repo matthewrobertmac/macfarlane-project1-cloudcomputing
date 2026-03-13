@@ -183,6 +183,7 @@ function App() {
   const [annotatingId, setAnnotatingId] = useState(null);
   const [annotationText, setAnnotationText] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [streamProgress, setStreamProgress] = useState(null); // { phase, sent, received, total }
   const [bulavaDemo, setBulavaDemo] = useState(null);
   const [bulavaCategory, setBulavaCategory] = useState("sportswear");
   const [bulavaType, setBulavaType] = useState("fact");
@@ -316,30 +317,103 @@ function App() {
     setTestState("running");
     setLiveMetrics([]);
     setTestResults(null);
+    setStreamProgress({ phase: "connecting", sent: 0, received: 0, total: profiles[testProfile].count });
+
+    const allLatencies = [];
+    const url = `${BACKEND_URL}/api/test/stream?profile=${testProfile}`;
+
     try {
-      const res = await fetch(`${BACKEND_URL}/api/test`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profile: testProfile }),
+      const eventSource = new EventSource(url);
+      let finalComplete = false;
+
+      eventSource.addEventListener("status", (e) => {
+        const data = JSON.parse(e.data);
+        setStreamProgress((p) => ({ ...p, phase: data.phase, total: data.total, message: data.message }));
       });
-      const data = await res.json();
-      setTestResults(data);
-      setTestState("complete");
-      fetchHistory();
+
+      eventSource.addEventListener("send_progress", (e) => {
+        const data = JSON.parse(e.data);
+        setStreamProgress((p) => ({ ...p, phase: "sending", sent: data.sent, total: data.total }));
+      });
+
+      eventSource.addEventListener("result_batch", (e) => {
+        const data = JSON.parse(e.data);
+        allLatencies.push(...data.new_latencies);
+        setStreamProgress((p) => ({ ...p, phase: "receiving", received: data.received, total: data.total }));
+        // Update live metrics incrementally for chart
+        setLiveMetrics([...allLatencies]);
+      });
+
+      eventSource.addEventListener("stats", (e) => {
+        const data = JSON.parse(e.data);
+        setTestResults((prev) => ({
+          ...(prev || {}),
+          stats: data.stats,
+          distribution: data.distribution,
+          latency_breakdown: data.latency_breakdown,
+          bottleneck_analysis: data.bottleneck_analysis,
+          throughput: data.stats.throughput,
+        }));
+      });
+
+      eventSource.addEventListener("complete", (e) => {
+        const data = JSON.parse(e.data);
+        finalComplete = true;
+        setTestResults((prev) => ({
+          ...(prev || {}),
+          sent: data.sent,
+          received: data.received,
+          throughput: data.throughput,
+          latencies: data.latencies.length > 0 ? data.latencies : allLatencies.slice(0, 100),
+        }));
+        setTestState("complete");
+        setStreamProgress(null);
+        fetchHistory();
+        eventSource.close();
+      });
+
+      eventSource.addEventListener("error_event", (e) => {
+        const data = JSON.parse(e.data);
+        console.error("SSE error:", data.message);
+        eventSource.close();
+        setTestState("complete");
+        setStreamProgress(null);
+      });
+
+      eventSource.onerror = () => {
+        if (!finalComplete) {
+          // Connection closed — finalize with whatever we have
+          if (allLatencies.length > 0) {
+            const sorted = [...allLatencies].sort((a, b) => a - b);
+            const n = sorted.length;
+            setTestResults((prev) => ({
+              ...(prev || {}),
+              sent: profiles[testProfile].count,
+              received: allLatencies.length,
+              latencies: allLatencies.slice(0, 100),
+              stats: prev?.stats || {
+                min: sorted[0], avg: Math.round(allLatencies.reduce((a, b) => a + b, 0) / n),
+                median: sorted[Math.floor(n / 2)],
+                p95: sorted[Math.floor(n * 0.95)] || sorted[n - 1],
+                max: sorted[n - 1],
+              },
+              distribution: prev?.distribution || {
+                fast: allLatencies.filter((l) => l < 500).length,
+                ok: allLatencies.filter((l) => l >= 500 && l < 1000).length,
+                slow: allLatencies.filter((l) => l >= 1000).length,
+              },
+              throughput: prev?.throughput || 0,
+            }));
+          }
+          setTestState("complete");
+          setStreamProgress(null);
+        }
+        eventSource.close();
+      };
     } catch (e) {
-      const profile = profiles[testProfile];
-      const sims = [];
-      for (let i = 0; i < profile.count; i++) {
-        sims.push((isWarmedUp ? 150 : 400) + Math.random() * 300 + i * (profile.delay === 0 ? 20 : 5));
-      }
-      const sorted = [...sims].sort((a, b) => a - b);
-      setTestResults({
-        sent: profile.count, received: profile.count, latencies: sims,
-        stats: { min: Math.round(sorted[0]), avg: Math.round(sims.reduce((a, b) => a + b, 0) / sims.length), median: Math.round(sorted[Math.floor(sorted.length / 2)]), p95: Math.round(sorted[Math.floor(sorted.length * 0.95)]), max: Math.round(sorted[sorted.length - 1]) },
-        distribution: { fast: sims.filter((l) => l < 500).length, ok: sims.filter((l) => l >= 500 && l < 1000).length, slow: sims.filter((l) => l >= 1000).length },
-        throughput: profile.count / (sims.reduce((a, b) => a + b, 0) / 1000),
-      });
+      console.error("SSE connection failed:", e);
       setTestState("complete");
+      setStreamProgress(null);
     }
   };
 
@@ -594,6 +668,70 @@ function App() {
                   </div>
                 </div>
               </div>
+
+              {/* Real-time Streaming Progress */}
+              {streamProgress && (
+                <div className="rounded-xl p-5 border" style={{ background: C.cardBg, borderColor: `${C.blue}30` }} data-testid="stream-progress">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="relative w-5 h-5">
+                      <div className="absolute inset-0 rounded-full animate-ping opacity-30" style={{ background: C.blue }} />
+                      <div className="absolute inset-0.5 rounded-full" style={{ background: C.blue }} />
+                    </div>
+                    <span className="text-white text-sm font-medium">
+                      {streamProgress.phase === "sending" ? "Sending to SQS..." :
+                       streamProgress.phase === "receiving" ? "Receiving results..." :
+                       "Connecting to pipeline..."}
+                    </span>
+                    <span className="text-white/30 text-xs ml-auto font-mono">
+                      {streamProgress.phase === "sending"
+                        ? `${streamProgress.sent}/${streamProgress.total} sent`
+                        : streamProgress.phase === "receiving"
+                        ? `${streamProgress.received}/${streamProgress.total} received`
+                        : ""}
+                    </span>
+                  </div>
+                  {/* Progress bar */}
+                  <div className="w-full h-2 rounded-full bg-white/5 overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-300"
+                      style={{
+                        width: `${streamProgress.phase === "sending"
+                          ? (streamProgress.sent / streamProgress.total) * 50
+                          : 50 + (streamProgress.received / streamProgress.total) * 50
+                        }%`,
+                        background: streamProgress.phase === "sending"
+                          ? `linear-gradient(90deg, ${C.gold}, ${C.blue})`
+                          : `linear-gradient(90deg, ${C.blue}, #10b981)`,
+                      }}
+                    />
+                  </div>
+                  <div className="flex justify-between mt-1.5">
+                    <span className="text-[10px] text-white/20">SQS Send</span>
+                    <span className="text-[10px] text-white/20">Lambda Process</span>
+                    <span className="text-[10px] text-white/20">Results</span>
+                  </div>
+
+                  {/* Live streaming chart — shows latencies as they arrive */}
+                  {liveMetrics.length > 0 && (
+                    <div className="mt-4 pt-3 border-t border-white/5">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-white/50 text-xs">Live Latency Feed</span>
+                        <span className="text-xs font-mono" style={{ color: C.blue }}>{liveMetrics.length} results</span>
+                      </div>
+                      <div className="h-32">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={liveMetrics.map((l, i) => ({ msg: i + 1, latency: l }))}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#1a1a2e" />
+                            <XAxis dataKey="msg" stroke="#333" fontSize={9} />
+                            <YAxis stroke="#333" fontSize={9} />
+                            <Line type="monotone" dataKey="latency" stroke="#10b981" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Results */}
               {testResults && (
