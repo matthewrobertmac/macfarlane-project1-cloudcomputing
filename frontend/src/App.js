@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import "@/App.css";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Github, Linkedin, Mail, ExternalLink, Server, Database, Cloud, Zap,
   BarChart3, Code2, GraduationCap, MapPin, Calendar, BookOpen, Award,
@@ -7,7 +8,7 @@ import {
   CheckCircle2, AlertCircle, Cpu, FileText, User, Briefcase, Globe,
   ChevronDown, ChevronUp, Target, Layers, Settings, Copy, Check, Terminal,
   Wifi, WifiOff, Gauge, Trash2, Home, Flag, Shield, ArrowRight, Pencil,
-  Download, Heart, Star, Menu, X
+  Download, Heart, Star, Menu, X, Calculator
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -167,6 +168,91 @@ output "results_queue_url"   { value = aws_sqs_queue.results.url }
 output "dynamodb_table_name" { value = aws_dynamodb_table.results.name }
 output "lambda_function_name" { value = aws_lambda_function.worker.function_name }`;
 
+// Framer Motion variants
+const pageVariants = {
+  initial: { opacity: 0, y: 12 },
+  animate: { opacity: 1, y: 0, transition: { duration: 0.3, ease: "easeOut" } },
+  exit: { opacity: 0, y: -8, transition: { duration: 0.15 } },
+};
+
+const staggerContainer = {
+  animate: { transition: { staggerChildren: 0.06 } },
+};
+
+const staggerItem = {
+  initial: { opacity: 0, y: 10 },
+  animate: { opacity: 1, y: 0, transition: { duration: 0.25 } },
+};
+
+// CSV Export
+function downloadCSV(testResults, testHistory, selectedRuns) {
+  let csv = "";
+  if (testResults) {
+    csv += "=== Current Test Results ===\n";
+    csv += "Metric,Value\n";
+    csv += `Min,${testResults.stats.min}ms\n`;
+    csv += `Avg,${testResults.stats.avg}ms\n`;
+    csv += `Median,${testResults.stats.median}ms\n`;
+    csv += `p95,${testResults.stats.p95}ms\n`;
+    csv += `Max,${testResults.stats.max}ms\n`;
+    csv += `Throughput,${testResults.throughput}/s\n`;
+    csv += `Sent,${testResults.sent}\n`;
+    csv += `Received,${testResults.received}\n`;
+    csv += `Fast (<500ms),${testResults.distribution.fast}\n`;
+    csv += `OK (500-1000ms),${testResults.distribution.ok}\n`;
+    csv += `Slow (>1000ms),${testResults.distribution.slow}\n`;
+    if (testResults.latency_breakdown) {
+      csv += "\n=== Latency Breakdown ===\n";
+      csv += "Service,Latency (ms)\n";
+      Object.entries(testResults.latency_breakdown).forEach(([k, v]) => {
+        csv += `${k.replace(/_/g, " ")},${v}\n`;
+      });
+    }
+    if (testResults.latencies?.length) {
+      csv += "\n=== Individual Latencies ===\n";
+      csv += "Message #,Latency (ms)\n";
+      testResults.latencies.forEach((l, i) => { csv += `${i + 1},${Math.round(l)}\n`; });
+    }
+  }
+  const runs = selectedRuns.length > 0 ? selectedRuns : testHistory;
+  if (runs.length > 0) {
+    csv += "\n=== Test History ===\n";
+    csv += "Profile,Timestamp,Sent,Received,Min,Avg,Median,p95,Max,Throughput,Annotation\n";
+    runs.forEach((r) => {
+      csv += `${r.profile},${r.timestamp},${r.sent},${r.received},${r.stats.min},${r.stats.avg},${r.stats.median},${r.stats.p95},${r.stats.max},${r.throughput},"${(r.annotation || "").replace(/"/g, '""')}"\n`;
+    });
+  }
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `adflow-results-${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Scoring calculator logic
+const RELEVANCE_MAP = {
+  "sports+sportswear": 1.4, "finance+fintech": 1.5, "entertainment+streaming": 1.4,
+  "news+insurance": 1.2, "lifestyle+beauty": 1.3, "lifestyle+travel": 1.3,
+};
+const TIME_BONUSES = [
+  { range: "6-8", label: "Morning", bonus: 1.2 },
+  { range: "9-11", label: "Mid-Morning", bonus: 1.0 },
+  { range: "12-13", label: "Lunch", bonus: 1.15 },
+  { range: "14-18", label: "Afternoon", bonus: 1.0 },
+  { range: "19-22", label: "Evening", bonus: 1.25 },
+  { range: "23-5", label: "Night", bonus: 0.9 },
+];
+function getTimeBonus(hour) {
+  if (hour >= 6 && hour <= 8) return 1.2;
+  if (hour >= 12 && hour <= 13) return 1.15;
+  if (hour >= 19 && hour <= 22) return 1.25;
+  if (hour >= 23 || hour <= 5) return 0.9;
+  return 1.0;
+}
+
+
 function App() {
   const [activeTab, setActiveTab] = useState("home");
   const [testState, setTestState] = useState("idle");
@@ -189,6 +275,11 @@ function App() {
   const [bulavaType, setBulavaType] = useState("fact");
   const [bulavaBatch, setBulavaBatch] = useState(null);
   const [bulavaAnalytics, setBulavaAnalytics] = useState(null);
+  const [calcBid, setCalcBid] = useState(4.50);
+  const [calcContent, setCalcContent] = useState("sports");
+  const [calcAdCat, setCalcAdCat] = useState("sportswear");
+  const [calcHour, setCalcHour] = useState(20);
+  const [calcDevice, setCalcDevice] = useState("mobile");
   const testRef = useRef(null);
 
   // Heartbeat
@@ -433,6 +524,16 @@ function App() {
 
   const filteredHistory = historyFilter === "all" ? testHistory : testHistory.filter((r) => r.profile === historyFilter);
 
+  // Scoring calculator
+  const calcScore = useMemo(() => {
+    const key = `${calcContent}+${calcAdCat}`;
+    const relevance = RELEVANCE_MAP[key] || 1.0;
+    const timeBonus = getTimeBonus(calcHour);
+    const deviceBonus = calcDevice === "mobile" ? 1.1 : 1.0;
+    const score = calcBid * relevance * timeBonus * deviceBonus;
+    return { score: score.toFixed(2), relevance, timeBonus, deviceBonus };
+  }, [calcBid, calcContent, calcAdCat, calcHour, calcDevice]);
+
   // ==========================================================================
   // RENDER
   // ==========================================================================
@@ -510,12 +611,13 @@ function App() {
         {/* MAIN CONTENT */}
         {/* ================================================================ */}
         <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+          <AnimatePresence mode="wait">
 
           {/* ============================================================== */}
           {/* HOME / HERO */}
           {/* ============================================================== */}
           {activeTab === "home" && (
-            <div className="space-y-10" data-testid="home-content">
+            <motion.div key="home" variants={pageVariants} initial="initial" animate="animate" exit="exit" className="space-y-10" data-testid="home-content">
               {/* Hero */}
               <div className="text-center py-12 md:py-20">
                 <p className="text-xs font-mono tracking-[0.3em] uppercase mb-4" style={{ color: C.gold }}>
@@ -599,20 +701,30 @@ function App() {
                   </div>
                 </div>
               </div>
-            </div>
+            </motion.div>
           )}
 
           {/* ============================================================== */}
           {/* LIVE TESTING */}
           {/* ============================================================== */}
           {activeTab === "test" && (
-            <div className="space-y-6" data-testid="test-content">
+            <motion.div key="test" variants={pageVariants} initial="initial" animate="animate" exit="exit" className="space-y-6" data-testid="test-content">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div>
                   <h2 className="text-2xl font-bold text-white">Live Testing Dashboard</h2>
                   <p className="text-white/40 text-sm">Real-time performance testing against live AWS infrastructure</p>
                 </div>
                 <div className="flex items-center gap-2">
+                  {(testResults || testHistory.length > 0) && (
+                    <button
+                      onClick={() => downloadCSV(testResults, testHistory, selectedRuns)}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs border transition-all hover:bg-white/5"
+                      style={{ borderColor: C.cardBorder, color: "rgba(255,255,255,0.5)" }}
+                      data-testid="csv-export-btn"
+                    >
+                      <Download className="w-3 h-3" /> Export CSV
+                    </button>
+                  )}
                   <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs border ${pcStatus.current_pc > 0 ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" : "bg-white/5 border-white/10 text-white/40"}`} data-testid="pc-status">
                     {pcStatus.current_pc > 0 ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
                     PC: {pcStatus.current_pc}
@@ -1084,14 +1196,14 @@ function App() {
                   ))}
                 </div>
               </div>
-            </div>
+            </motion.div>
           )}
 
           {/* ============================================================== */}
           {/* ARCHITECTURE */}
           {/* ============================================================== */}
           {activeTab === "architecture" && (
-            <div className="space-y-6" data-testid="architecture-content">
+            <motion.div key="architecture" variants={pageVariants} initial="initial" animate="animate" exit="exit" className="space-y-6" data-testid="architecture-content">
               <h2 className="text-2xl font-bold text-white">Pipeline Architecture</h2>
               <p className="text-white/40 text-sm">SQS Input → Lambda Worker → SQS Results + DynamoDB</p>
 
@@ -1152,6 +1264,123 @@ function App() {
                 </div>
               </div>
 
+              {/* Interactive Scoring Calculator */}
+              <div className="rounded-xl p-5 border" style={{ background: C.cardBg, borderColor: `${C.blue}20` }} data-testid="scoring-calculator">
+                <h3 className="text-white text-sm font-medium mb-4 flex items-center gap-2">
+                  <Calculator className="w-4 h-4" style={{ color: C.gold }} /> Interactive Score Calculator
+                </h3>
+                <div className="grid md:grid-cols-2 gap-5">
+                  {/* Controls */}
+                  <div className="space-y-4">
+                    {/* Bid Amount Slider */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-white/40 text-[10px] uppercase tracking-wider">Bid Amount</label>
+                        <span className="font-mono text-sm font-bold" style={{ color: C.gold }}>${calcBid.toFixed(2)}</span>
+                      </div>
+                      <input
+                        type="range" min="1" max="10" step="0.25" value={calcBid}
+                        onChange={(e) => setCalcBid(parseFloat(e.target.value))}
+                        className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+                        style={{ background: `linear-gradient(to right, ${C.gold} ${((calcBid - 1) / 9) * 100}%, rgba(255,255,255,0.1) ${((calcBid - 1) / 9) * 100}%)` }}
+                        data-testid="calc-bid-slider"
+                      />
+                      <div className="flex justify-between text-[9px] text-white/20 mt-0.5"><span>$1.00</span><span>$10.00</span></div>
+                    </div>
+                    {/* Content Category */}
+                    <div>
+                      <label className="text-white/40 text-[10px] uppercase tracking-wider mb-1.5 block">Content Category</label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {["sports", "news", "entertainment", "finance", "lifestyle"].map((c) => (
+                          <button key={c} onClick={() => setCalcContent(c)}
+                            className={`px-2.5 py-1 rounded text-[10px] font-medium transition-all ${calcContent === c ? "text-white" : "text-white/30 hover:text-white/50"}`}
+                            style={calcContent === c ? { background: "#10b981" } : { background: "rgba(255,255,255,0.03)" }}
+                          >{c}</button>
+                        ))}
+                      </div>
+                    </div>
+                    {/* Ad Category */}
+                    <div>
+                      <label className="text-white/40 text-[10px] uppercase tracking-wider mb-1.5 block">Ad Category</label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {["sportswear", "fintech", "streaming", "insurance", "beauty", "travel"].map((c) => (
+                          <button key={c} onClick={() => setCalcAdCat(c)}
+                            className={`px-2.5 py-1 rounded text-[10px] font-medium transition-all ${calcAdCat === c ? "text-white" : "text-white/30 hover:text-white/50"}`}
+                            style={calcAdCat === c ? { background: "#10b981" } : { background: "rgba(255,255,255,0.03)" }}
+                          >{c}</button>
+                        ))}
+                      </div>
+                    </div>
+                    {/* Hour Slider */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-white/40 text-[10px] uppercase tracking-wider">Time of Day</label>
+                        <span className="font-mono text-sm text-amber-400">{calcHour}:00</span>
+                      </div>
+                      <input
+                        type="range" min="0" max="23" step="1" value={calcHour}
+                        onChange={(e) => setCalcHour(parseInt(e.target.value))}
+                        className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+                        style={{ background: `linear-gradient(to right, #f59e0b ${(calcHour / 23) * 100}%, rgba(255,255,255,0.1) ${(calcHour / 23) * 100}%)` }}
+                        data-testid="calc-hour-slider"
+                      />
+                      <div className="flex justify-between text-[9px] text-white/20 mt-0.5"><span>00:00</span><span>12:00</span><span>23:00</span></div>
+                    </div>
+                    {/* Device */}
+                    <div>
+                      <label className="text-white/40 text-[10px] uppercase tracking-wider mb-1.5 block">Device</label>
+                      <div className="flex gap-2">
+                        {["mobile", "desktop"].map((d) => (
+                          <button key={d} onClick={() => setCalcDevice(d)}
+                            className={`px-3 py-1.5 rounded text-[10px] font-medium transition-all ${calcDevice === d ? "text-white" : "text-white/30 hover:text-white/50"}`}
+                            style={calcDevice === d ? { background: "#06b6d4" } : { background: "rgba(255,255,255,0.03)" }}
+                          >{d}</button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Result */}
+                  <div className="flex flex-col justify-between">
+                    <div className="rounded-xl p-5 text-center" style={{ background: `linear-gradient(135deg, ${C.blue}10, ${C.gold}08)`, border: `1px solid ${C.blue}25` }}>
+                      <p className="text-white/40 text-[10px] uppercase tracking-wider mb-2">Final Score</p>
+                      <p className="text-5xl font-bold font-mono" style={{ color: C.blue }} data-testid="calc-result">{calcScore.score}</p>
+                    </div>
+                    <div className="mt-4 rounded-lg p-4 font-mono text-xs" style={{ background: "rgba(0,91,187,0.06)", border: `1px solid ${C.blue}15` }}>
+                      <p className="text-white/50 mb-2">Calculation breakdown:</p>
+                      <p>
+                        <span style={{ color: C.gold }}>${calcBid.toFixed(2)}</span>
+                        <span className="text-white/30"> × </span>
+                        <span className="text-emerald-400">{calcScore.relevance.toFixed(2)}x</span>
+                        <span className="text-white/20"> relevance</span>
+                      </p>
+                      <p>
+                        <span className="text-white/20 ml-4">× </span>
+                        <span className="text-amber-400">{calcScore.timeBonus.toFixed(2)}x</span>
+                        <span className="text-white/20"> time ({calcHour}:00)</span>
+                      </p>
+                      <p>
+                        <span className="text-white/20 ml-4">× </span>
+                        <span className="text-cyan-400">{calcScore.deviceBonus.toFixed(2)}x</span>
+                        <span className="text-white/20"> device ({calcDevice})</span>
+                      </p>
+                      <p className="mt-2 pt-2 border-t border-white/5">
+                        <span className="text-white/30">= </span>
+                        <span style={{ color: C.blue }} className="font-bold">{calcScore.score}</span>
+                      </p>
+                    </div>
+                    {/* Context badges */}
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      <span className="px-2 py-0.5 rounded text-[9px]" style={{ background: `${C.gold}12`, color: C.gold }}>{calcContent} + {calcAdCat} = {calcScore.relevance}x</span>
+                      <span className="px-2 py-0.5 rounded text-[9px]" style={{ background: "rgba(245,158,11,0.1)", color: "#f59e0b" }}>
+                        {TIME_BONUSES.find((t) => getTimeBonus(calcHour) === t.bonus)?.label || "Standard"} hours
+                      </span>
+                      {calcDevice === "mobile" && <span className="px-2 py-0.5 rounded text-[9px]" style={{ background: "rgba(6,182,212,0.1)", color: "#06b6d4" }}>Mobile boost active</span>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {/* Key AWS resources */}
               <div className="rounded-xl p-5 border" style={{ background: C.cardBg, borderColor: C.cardBorder }}>
                 <h3 className="text-white text-sm font-medium mb-3">AWS Resources</h3>
@@ -1170,14 +1399,14 @@ function App() {
                   ))}
                 </div>
               </div>
-            </div>
+            </motion.div>
           )}
 
           {/* ============================================================== */}
           {/* OPTIMIZATIONS */}
           {/* ============================================================== */}
           {activeTab === "optimizations" && (
-            <div className="space-y-6" data-testid="optimizations-content">
+            <motion.div key="optimizations" variants={pageVariants} initial="initial" animate="animate" exit="exit" className="space-y-6" data-testid="optimizations-content">
               <h2 className="text-2xl font-bold text-white">Performance Optimizations</h2>
               <p className="text-white/40 text-sm">Three tiers of optimizations for sub-100ms warm latency.</p>
 
@@ -1260,14 +1489,14 @@ function App() {
                   ))}
                 </div>
               </div>
-            </div>
+            </motion.div>
           )}
 
           {/* ============================================================== */}
           {/* TERRAFORM */}
           {/* ============================================================== */}
           {activeTab === "terraform" && (
-            <div className="space-y-6" data-testid="terraform-content">
+            <motion.div key="terraform" variants={pageVariants} initial="initial" animate="animate" exit="exit" className="space-y-6" data-testid="terraform-content">
               <h2 className="text-2xl font-bold text-white">Infrastructure as Code</h2>
               <p className="text-white/40 text-sm">Complete Terraform configuration for the AdFlow pipeline.</p>
               {[
@@ -1296,14 +1525,14 @@ function App() {
                   <p className="text-white/40">$ <span className="text-emerald-400">terraform apply -auto-approve</span></p>
                 </div>
               </div>
-            </div>
+            </motion.div>
           )}
 
           {/* ============================================================== */}
           {/* COURSE */}
           {/* ============================================================== */}
           {activeTab === "course" && (
-            <div className="space-y-6" data-testid="course-content">
+            <motion.div key="course" variants={pageVariants} initial="initial" animate="animate" exit="exit" className="space-y-6" data-testid="course-content">
               <h2 className="text-2xl font-bold text-white">Course Information</h2>
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="rounded-xl p-5 border" style={{ background: C.cardBg, borderColor: C.cardBorder }}>
@@ -1348,14 +1577,14 @@ function App() {
                   ))}
                 </div>
               </div>
-            </div>
+            </motion.div>
           )}
 
           {/* ============================================================== */}
           {/* ABOUT MATT */}
           {/* ============================================================== */}
           {activeTab === "about" && (
-            <div className="space-y-6" data-testid="about-content">
+            <motion.div key="about" variants={pageVariants} initial="initial" animate="animate" exit="exit" className="space-y-6" data-testid="about-content">
               {/* Hero banner */}
               <div className="rounded-xl p-6 md:p-8 border" style={{ background: `linear-gradient(135deg, ${C.blue}12, ${C.dark})`, borderColor: `${C.blue}20` }}>
                 <div className="flex flex-col md:flex-row md:items-center gap-6">
@@ -1443,14 +1672,14 @@ function App() {
                   ))}
                 </div>
               </div>
-            </div>
+            </motion.div>
           )}
 
           {/* ============================================================== */}
           {/* PROJECT BULAVA */}
           {/* ============================================================== */}
           {activeTab === "bulava" && (
-            <div className="space-y-6" data-testid="bulava-content">
+            <motion.div key="bulava" variants={pageVariants} initial="initial" animate="animate" exit="exit" className="space-y-6" data-testid="bulava-content">
               {/* Hero */}
               <div className="rounded-xl p-8 text-center" style={{ background: `linear-gradient(135deg, ${C.blue}20, ${C.gold}08)`, border: `1px solid ${C.gold}25` }}>
                 <p className="font-mono text-xs tracking-wider mb-2" style={{ color: C.gold }}>PROJECT BULAVA</p>
@@ -1817,8 +2046,10 @@ function App() {
                   <Mail className="w-4 h-4" /> matthew.macfarlane27@ncf.edu
                 </a>
               </div>
-            </div>
+            </motion.div>
           )}
+
+          </AnimatePresence>
         </main>
 
         {/* ================================================================ */}
