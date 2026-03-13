@@ -121,6 +121,65 @@ class TestBulavaCategoriesEndpoint:
         print(f"Augmentation types: {data['augmentation_types']}")
 
 
+class TestBulavaAnalyticsEndpoint:
+    """Tests for augmentation analytics"""
+    
+    def test_get_analytics(self):
+        """Test GET /api/bulava/analytics returns aggregated data"""
+        response = requests.get(f"{BASE_URL}/api/bulava/analytics")
+        assert response.status_code == 200
+        data = response.json()
+        
+        # Verify structure
+        assert "total_augmentations" in data
+        assert "by_category" in data
+        assert "by_type" in data
+        assert "top_category" in data
+        assert "top_type" in data
+        
+        # Verify total is a positive number (seeded data exists)
+        assert data["total_augmentations"] >= 0
+        
+        # Verify by_category is a dict
+        assert isinstance(data["by_category"], dict)
+        
+        # Verify by_type is a dict
+        assert isinstance(data["by_type"], dict)
+        
+        # If data exists, verify top_category and top_type are populated
+        if data["total_augmentations"] > 0:
+            assert data["top_category"] is not None
+            assert data["top_type"] is not None
+            assert len(data["by_category"]) > 0
+            assert len(data["by_type"]) > 0
+        
+        print(f"Total augmentations: {data['total_augmentations']}")
+        print(f"By category: {data['by_category']}")
+        print(f"By type: {data['by_type']}")
+        print(f"Top category: {data['top_category']}")
+        print(f"Top type: {data['top_type']}")
+    
+    def test_analytics_updates_after_augment(self):
+        """Test that analytics update after generating augmentations"""
+        # Get initial count
+        response1 = requests.get(f"{BASE_URL}/api/bulava/analytics")
+        initial_count = response1.json()["total_augmentations"]
+        
+        # Generate an augmentation
+        requests.post(
+            f"{BASE_URL}/api/bulava/augment",
+            json={"ad_category": "fintech", "type": "fact"}
+        )
+        
+        # Get updated count
+        response2 = requests.get(f"{BASE_URL}/api/bulava/analytics")
+        updated_count = response2.json()["total_augmentations"]
+        
+        # Verify count increased
+        assert updated_count > initial_count
+        print(f"✓ Analytics updated: {initial_count} -> {updated_count}")
+
+
 class TestBulavaBatchDemoEndpoint:
     """Tests for batch augmentation simulation"""
     

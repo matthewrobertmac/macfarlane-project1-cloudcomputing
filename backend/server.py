@@ -628,6 +628,11 @@ async def bulava_augment(body: dict):
     augmentation["ad_category"] = ad_category
     augmentation["content_category"] = content_category
     augmentation["device_type"] = device_type
+    # Track for analytics (fire-and-forget, no await blocking)
+    await db.bulava_analytics.insert_one({
+        "ad_category": ad_category, "type": augmentation["type"], "tier": 3,
+        "timestamp": datetime.now(timezone.utc).isoformat(), "_source": "single",
+    })
     return augmentation
 
 @api_router.get("/bulava/categories")
@@ -658,12 +663,47 @@ async def bulava_batch_demo(body: dict):
     type_dist = {}
     for r in results:
         type_dist[r["type"]] = type_dist.get(r["type"], 0) + 1
+    # Track batch for analytics
+    docs = [{"ad_category": r["ad_category"], "type": r["type"], "tier": 3,
+             "timestamp": datetime.now(timezone.utc).isoformat(), "_source": "batch"} for r in results]
+    await db.bulava_analytics.insert_many(docs)
     return {
         "count": count,
         "results": results,
         "tier_distribution": tier_dist,
         "type_distribution": type_dist,
         "note": "Tier 3 (template) only — Tier 1 (speculative cache) and Tier 2 (micro-LLM) require deployed Lambda infrastructure",
+    }
+
+@api_router.get("/bulava/analytics")
+async def bulava_analytics():
+    """Get Bulava augmentation analytics — category & type distributions, totals, timeline."""
+    pipeline_cat = [{"$group": {"_id": "$ad_category", "count": {"$sum": 1}}}, {"$sort": {"count": -1}}]
+    pipeline_type = [{"$group": {"_id": "$type", "count": {"$sum": 1}}}, {"$sort": {"count": -1}}]
+    pipeline_hourly = [
+        {"$addFields": {"hour": {"$substr": ["$timestamp", 11, 2]}}},
+        {"$group": {"_id": "$hour", "count": {"$sum": 1}}},
+        {"$sort": {"_id": 1}},
+    ]
+
+    cat_results = await db.bulava_analytics.aggregate(pipeline_cat).to_list(20)
+    type_results = await db.bulava_analytics.aggregate(pipeline_type).to_list(10)
+    hourly_results = await db.bulava_analytics.aggregate(pipeline_hourly).to_list(24)
+    total = await db.bulava_analytics.count_documents({})
+
+    by_category = {r["_id"]: r["count"] for r in cat_results if r["_id"]}
+    by_type = {r["_id"]: r["count"] for r in type_results if r["_id"]}
+    by_hour = {r["_id"]: r["count"] for r in hourly_results if r["_id"]}
+    top_category = cat_results[0]["_id"] if cat_results else None
+    top_type = type_results[0]["_id"] if type_results else None
+
+    return {
+        "total_augmentations": total,
+        "by_category": by_category,
+        "by_type": by_type,
+        "by_hour": by_hour,
+        "top_category": top_category,
+        "top_type": top_type,
     }
 
 

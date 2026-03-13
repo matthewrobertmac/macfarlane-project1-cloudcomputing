@@ -187,6 +187,7 @@ function App() {
   const [bulavaCategory, setBulavaCategory] = useState("sportswear");
   const [bulavaType, setBulavaType] = useState("fact");
   const [bulavaBatch, setBulavaBatch] = useState(null);
+  const [bulavaAnalytics, setBulavaAnalytics] = useState(null);
   const testRef = useRef(null);
 
   // Heartbeat
@@ -227,6 +228,11 @@ function App() {
   };
   useEffect(() => { fetchHistory(); }, []);
 
+  // Fetch Bulava analytics when tab is active
+  useEffect(() => {
+    if (activeTab === "bulava") fetchBulavaAnalytics();
+  }, [activeTab]);
+
   const toggleRunSelection = (run) => {
     setSelectedRuns((prev) => {
       const exists = prev.find((r) => r.id === run.id);
@@ -257,6 +263,7 @@ function App() {
       });
       const data = await res.json();
       setBulavaDemo(data);
+      fetchBulavaAnalytics();
     } catch (e) { console.log("Bulava augment failed:", e); }
   };
 
@@ -269,7 +276,16 @@ function App() {
       });
       const data = await res.json();
       setBulavaBatch(data);
+      fetchBulavaAnalytics();
     } catch (e) { console.log("Bulava batch failed:", e); }
+  };
+
+  const fetchBulavaAnalytics = async () => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/bulava/analytics`);
+      const data = await res.json();
+      setBulavaAnalytics(data);
+    } catch (e) { console.log("Bulava analytics failed:", e); }
   };
 
   const saveAnnotation = async (id, text) => {
@@ -1504,6 +1520,75 @@ function App() {
                   <p className="text-white/20 text-xs text-center py-4">Click "Run 20-Ad Batch" to see Bulava augment a batch of ads.</p>
                 )}
               </div>
+
+
+              {/* Bulava Analytics Dashboard */}
+              {bulavaAnalytics && bulavaAnalytics.total_augmentations > 0 && (
+                <div className="rounded-xl p-5 border" style={{ background: C.cardBg, borderColor: `${C.gold}20` }} data-testid="bulava-analytics">
+                  <h3 className="text-white text-sm font-medium mb-4 flex items-center gap-2">
+                    <BarChart3 className="w-4 h-4" style={{ color: C.gold }} /> Augmentation Analytics
+                  </h3>
+                  {/* Summary stats */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+                    <div className="rounded-lg p-3 text-center" style={{ background: `${C.gold}08` }}>
+                      <p className="text-2xl font-bold" style={{ color: C.gold }}>{bulavaAnalytics.total_augmentations}</p>
+                      <p className="text-white/40 text-[10px]">Total Augmentations</p>
+                    </div>
+                    <div className="rounded-lg p-3 text-center" style={{ background: `${C.blue}08` }}>
+                      <p className="text-2xl font-bold" style={{ color: C.blue }}>{Object.keys(bulavaAnalytics.by_category).length}</p>
+                      <p className="text-white/40 text-[10px]">Categories Reached</p>
+                    </div>
+                    <div className="rounded-lg p-3 text-center bg-emerald-500/5">
+                      <p className="text-lg font-bold text-emerald-400 capitalize">{bulavaAnalytics.top_category?.replace("_", " ") || "—"}</p>
+                      <p className="text-white/40 text-[10px]">Top Category</p>
+                    </div>
+                    <div className="rounded-lg p-3 text-center bg-white/[0.03]">
+                      <p className="text-lg font-bold text-white/70 capitalize">{bulavaAnalytics.top_type?.replace("_", " ") || "—"}</p>
+                      <p className="text-white/40 text-[10px]">Top Message Type</p>
+                    </div>
+                  </div>
+                  {/* Charts */}
+                  <div className="grid md:grid-cols-2 gap-4">
+                    {/* Category distribution */}
+                    <div className="rounded-lg p-3 bg-white/[0.02]">
+                      <p className="text-white/40 text-[10px] uppercase tracking-wider mb-3">By Ad Category</p>
+                      <div className="h-48">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={Object.entries(bulavaAnalytics.by_category).map(([cat, count]) => ({ name: cat.replace("_", " "), count }))} layout="vertical">
+                            <CartesianGrid strokeDasharray="3 3" stroke="#1a1a2e" />
+                            <XAxis type="number" stroke="#444" fontSize={10} />
+                            <YAxis type="category" dataKey="name" stroke="#444" fontSize={9} width={70} />
+                            <Tooltip contentStyle={{ backgroundColor: "#111", border: "1px solid #333", fontSize: 11 }} />
+                            <Bar dataKey="count" fill={C.blue} radius={[0, 4, 4, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                    {/* Type distribution */}
+                    <div className="rounded-lg p-3 bg-white/[0.02]">
+                      <p className="text-white/40 text-[10px] uppercase tracking-wider mb-3">By Message Type</p>
+                      <div className="h-48">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={Object.entries(bulavaAnalytics.by_type).map(([type, count]) => ({ name: type.replace(/_/g, " "), value: count }))}
+                              dataKey="value" cx="50%" cy="50%" outerRadius={65} innerRadius={30}
+                              label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                              labelLine={false} fontSize={9}
+                            >
+                              {Object.keys(bulavaAnalytics.by_type).map((_, i) => (
+                                <Cell key={i} fill={[C.gold, C.blue, "#10b981", "#f59e0b", "#8b5cf6", "#06b6d4"][i % 6]} />
+                              ))}
+                            </Pie>
+                            <Tooltip contentStyle={{ backgroundColor: "#111", border: "1px solid #333", fontSize: 11 }} />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  </div>
+                  <p className="text-white/20 text-[10px] mt-3 text-center">Analytics update after each augmentation. Use the demo above to grow the dataset.</p>
+                </div>
+              )}
 
               {/* Diia Platform */}
               <div className="rounded-xl p-5 border" style={{ background: C.cardBg, borderColor: C.cardBorder }}>
