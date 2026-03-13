@@ -280,8 +280,8 @@ def get_sqs_client():
         return boto3.client(
             "sqs",
             region_name=AWS_REGION,
-            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", "AKIA33UF7HJBOVUWZML7"),
-            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", "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")
+            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY")
         )
     except Exception as e:
         logger.error(f"Failed to create SQS client: {e}")
@@ -726,8 +726,8 @@ def get_lambda_client():
         return boto3.client(
             "lambda",
             region_name=AWS_REGION,
-            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", "AKIA33UF7HJBOVUWZML7"),
-            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", "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")
+            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY")
         )
     except Exception as e:
         logger.error(f"Failed to create Lambda client: {e}")
