@@ -185,31 +185,23 @@ function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const testRef = useRef(null);
 
-  // Heartbeat
+  // Combined heartbeat + PC status polling (merged to reduce network requests)
   useEffect(() => {
     const sendHeartbeat = async () => {
       try {
         const res = await fetch(`${BACKEND_URL}/api/heartbeat`, { method: "POST" });
         const data = await res.json();
-        setPcStatus((p) => ({ ...p, current_pc: data.provisioned_concurrency, status: data.status }));
+        setPcStatus({
+          current_pc: data.provisioned_concurrency,
+          target_pc: data.target_pc,
+          last_activity: data.last_activity,
+          minutes_since_activity: data.minutes_since_activity,
+          status: data.status,
+        });
       } catch (e) { console.log("Heartbeat failed:", e); }
     };
     sendHeartbeat();
-    const interval = setInterval(sendHeartbeat, 30000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Fetch PC status
-  useEffect(() => {
-    const fetchPCStatus = async () => {
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/pc-status`);
-        const data = await res.json();
-        setPcStatus(data);
-      } catch (e) { console.log("PC status failed:", e); }
-    };
-    fetchPCStatus();
-    const interval = setInterval(fetchPCStatus, 10000);
+    const interval = setInterval(sendHeartbeat, 10000);
     return () => clearInterval(interval);
   }, []);
 
@@ -235,13 +227,13 @@ function App() {
   const deleteHistoryEntry = async (id) => {
     await fetch(`${BACKEND_URL}/api/test-history/${id}`, { method: "DELETE" });
     setSelectedRuns((prev) => prev.filter((r) => r.id !== id));
-    fetchHistory();
+    setTestHistory((prev) => prev.filter((r) => r.id !== id));
   };
 
   const clearHistory = async () => {
     await fetch(`${BACKEND_URL}/api/test-history`, { method: "DELETE" });
     setSelectedRuns([]);
-    fetchHistory();
+    setTestHistory([]);
   };
 
   const saveAnnotation = async (id, text) => {
@@ -252,7 +244,9 @@ function App() {
     });
     setAnnotatingId(null);
     setAnnotationText("");
-    fetchHistory();
+    setTestHistory((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, annotation: text } : r))
+    );
   };
 
   const handleWarmUp = async () => {
@@ -281,7 +275,22 @@ function App() {
       const data = await res.json();
       setTestResults(data);
       setTestState("complete");
-      fetchHistory();
+      // Optimistically prepend to history instead of re-fetching all entries
+      if (data.stats) {
+        const entry = {
+          id: crypto.randomUUID?.() || Date.now().toString(),
+          profile: testProfile,
+          timestamp: new Date().toISOString(),
+          sent: data.sent,
+          received: data.received,
+          stats: data.stats,
+          distribution: data.distribution,
+          throughput: data.throughput,
+          latency_breakdown: data.latency_breakdown,
+          bottleneck_analysis: data.bottleneck_analysis,
+        };
+        setTestHistory((prev) => [entry, ...prev].slice(0, 50));
+      }
     } catch (e) {
       const profile = profiles[testProfile];
       const sims = [];

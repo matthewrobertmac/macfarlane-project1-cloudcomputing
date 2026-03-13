@@ -32,6 +32,23 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
+# AWS boto3 singleton clients (reused across requests to avoid 50-200ms creation overhead)
+_aws_credentials = {
+    "region_name": "us-east-1",
+    "aws_access_key_id": os.environ.get("AWS_ACCESS_KEY_ID", "AKIA33UF7HJBOVUWZML7"),
+    "aws_secret_access_key": os.environ.get("AWS_SECRET_ACCESS_KEY", "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"),
+}
+sqs_client = boto3.client("sqs", **_aws_credentials)
+lambda_client = boto3.client("lambda", **_aws_credentials)
+
+# Thread pool for offloading blocking boto3 calls from the async event loop
+boto3_executor = ThreadPoolExecutor(max_workers=10)
+
+async def run_boto3(func, *args, **kwargs):
+    """Run a blocking boto3 call in a thread pool to avoid blocking the event loop."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(boto3_executor, lambda: func(*args, **kwargs))
+
 # Create the main app without a prefix
 app = FastAPI()
 
@@ -171,46 +188,31 @@ def generate_opportunity():
         ],
     }
 
-def get_sqs_client():
-    """Get SQS client with credentials."""
-    try:
-        return boto3.client(
-            "sqs",
-            region_name=AWS_REGION,
-            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", "AKIA33UF7HJBOVUWZML7"),
-            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", "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")
-        )
-    except Exception as e:
-        logger.error(f"Failed to create SQS client: {e}")
-        return None
-
 @api_router.post("/warmup", response_model=WarmupResponse)
 async def warmup_lambda():
     """
     Warm up Lambda by sending a few messages to trigger container provisioning.
     This eliminates cold-start latency for subsequent burst tests.
     """
-    sqs = get_sqs_client()
-    if not sqs:
-        return WarmupResponse(success=False, message="Failed to connect to AWS", lambda_invocations=0)
-    
     try:
         # Send 5 warmup messages to trigger Lambda
         warmup_count = 5
         for i in range(warmup_count):
             opp = generate_opportunity()
-            sqs.send_message(
+            await run_boto3(
+                sqs_client.send_message,
                 QueueUrl=INPUT_QUEUE_URL,
                 MessageBody=json.dumps(opp)
             )
-        
+
         # Wait for Lambda to process
         await asyncio.sleep(3)
-        
+
         # Drain results queue
         received = 0
         for _ in range(10):
-            response = sqs.receive_message(
+            response = await run_boto3(
+                sqs_client.receive_message,
                 QueueUrl=RESULTS_QUEUE_URL,
                 MaxNumberOfMessages=10,
                 WaitTimeSeconds=1
@@ -219,12 +221,18 @@ async def warmup_lambda():
             if not msgs:
                 break
             received += len(msgs)
-            for msg in msgs:
-                sqs.delete_message(
+            # Batch delete instead of individual deletes
+            if msgs:
+                entries = [
+                    {"Id": str(idx), "ReceiptHandle": msg["ReceiptHandle"]}
+                    for idx, msg in enumerate(msgs)
+                ]
+                await run_boto3(
+                    sqs_client.delete_message_batch,
                     QueueUrl=RESULTS_QUEUE_URL,
-                    ReceiptHandle=msg["ReceiptHandle"]
+                    Entries=entries
                 )
-        
+
         return WarmupResponse(
             success=True,
             message=f"Lambda warmed up successfully. Processed {received} warmup messages.",
@@ -243,78 +251,89 @@ async def run_test(request: TestRequest):
     count = profile["count"]
     delay_ms = profile["delay_ms"]
     
-    sqs = get_sqs_client()
-    if not sqs:
-        # Return simulated results if AWS not available
-        return generate_simulated_results(count)
-    
     try:
         random.seed(42)  # Reproducible results
-        
+
         # Track send times for latency calculation
         send_times = {}
-        
+
         # Send messages
         logger.info(f"Starting test: {request.profile} ({count} messages)")
-        
+
         messages = [generate_opportunity() for _ in range(count)]
-        
-        # Send in batches of 10
+
+        # Send in batches of 10 (non-blocking via executor)
         for i in range(0, len(messages), 10):
             batch = messages[i:i + 10]
             entries = [
                 {"Id": str(idx), "MessageBody": json.dumps(msg)}
                 for idx, msg in enumerate(batch)
             ]
-            
+
             batch_send_time = int(time.time() * 1000)
-            
-            sqs.send_message_batch(QueueUrl=INPUT_QUEUE_URL, Entries=entries)
-            
+
+            await run_boto3(sqs_client.send_message_batch, QueueUrl=INPUT_QUEUE_URL, Entries=entries)
+
             for msg in batch:
                 send_times[msg["opportunity_id"]] = batch_send_time
-            
+
             if delay_ms > 0 and i + 10 < len(messages):
                 await asyncio.sleep(delay_ms / 1000)
-        
-        # Poll for results
+
+        # Poll for results with long polling and concurrent receivers
         received_ids = set()
         latencies = []
         poll_start = time.time()
         poll_timeout = 60
-        
+
+        async def poll_once():
+            """Single poll request, run in executor."""
+            return await run_boto3(
+                sqs_client.receive_message,
+                QueueUrl=RESULTS_QUEUE_URL,
+                MaxNumberOfMessages=10,
+                WaitTimeSeconds=5
+            )
+
         while len(received_ids) < count and (time.time() - poll_start) < poll_timeout:
             try:
-                response = sqs.receive_message(
-                    QueueUrl=RESULTS_QUEUE_URL,
-                    MaxNumberOfMessages=10,
-                    WaitTimeSeconds=1
-                )
-                
-                msgs = response.get("Messages", [])
-                if not msgs:
+                # Run 2 concurrent poll requests for higher throughput
+                responses = await asyncio.gather(poll_once(), poll_once())
+
+                all_msgs = []
+                for response in responses:
+                    all_msgs.extend(response.get("Messages", []))
+
+                if not all_msgs:
                     continue
-                
+
                 receive_time = int(time.time() * 1000)
-                
-                for msg in msgs:
+                delete_entries = []
+
+                for idx, msg in enumerate(all_msgs):
                     try:
                         body = json.loads(msg["Body"])
                         opp_id = body.get("opportunity_id")
-                        
+
                         if opp_id and opp_id not in received_ids:
                             received_ids.add(opp_id)
-                            
+
                             if opp_id in send_times:
                                 latency = receive_time - send_times[opp_id]
                                 latencies.append(latency)
-                        
-                        sqs.delete_message(
-                            QueueUrl=RESULTS_QUEUE_URL,
-                            ReceiptHandle=msg["ReceiptHandle"]
-                        )
+
+                        delete_entries.append({"Id": str(idx), "ReceiptHandle": msg["ReceiptHandle"]})
                     except Exception:
                         pass
+
+                # Batch delete (up to 10 per call)
+                for i in range(0, len(delete_entries), 10):
+                    batch = delete_entries[i:i + 10]
+                    await run_boto3(
+                        sqs_client.delete_message_batch,
+                        QueueUrl=RESULTS_QUEUE_URL,
+                        Entries=batch
+                    )
             except Exception as e:
                 logger.error(f"Poll error: {e}")
         
@@ -470,6 +489,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.on_event("startup")
+async def startup_db_indexes():
+    """Create MongoDB indexes for efficient queries."""
+    await db.test_history.create_index([("timestamp", -1)])
+    await db.test_history.create_index("id", unique=True)
+
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
@@ -518,36 +543,21 @@ IDLE_TIMEOUT_MINUTES = 5  # Scale down after this many minutes of inactivity
 # Store last activity time
 _last_activity = {"timestamp": None, "current_pc": 0}
 
-def get_lambda_client():
-    """Get Lambda client for PC management."""
-    try:
-        return boto3.client(
-            "lambda",
-            region_name=AWS_REGION,
-            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", "AKIA33UF7HJBOVUWZML7"),
-            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", "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")
-        )
-    except Exception as e:
-        logger.error(f"Failed to create Lambda client: {e}")
-        return None
-
 async def set_provisioned_concurrency(count: int):
     """Set provisioned concurrency for the Lambda function."""
-    lambda_client = get_lambda_client()
-    if not lambda_client:
-        return {"success": False, "message": "Failed to connect to AWS"}
-    
     try:
         if count > 0:
             # First, publish a new version
-            version_response = lambda_client.publish_version(
+            version_response = await run_boto3(
+                lambda_client.publish_version,
                 FunctionName=LAMBDA_FUNCTION_NAME,
                 Description=f"Auto-scaled PC version at {datetime.now(timezone.utc).isoformat()}"
             )
             version = version_response['Version']
-            
+
             # Set provisioned concurrency on this version
-            lambda_client.put_provisioned_concurrency_config(
+            await run_boto3(
+                lambda_client.put_provisioned_concurrency_config,
                 FunctionName=LAMBDA_FUNCTION_NAME,
                 Qualifier=version,
                 ProvisionedConcurrentExecutions=count
@@ -558,21 +568,21 @@ async def set_provisioned_concurrency(count: int):
         else:
             # Delete all provisioned concurrency configs
             try:
-                # List all versions and delete PC configs
                 paginator = lambda_client.get_paginator('list_versions_by_function')
                 for page in paginator.paginate(FunctionName=LAMBDA_FUNCTION_NAME):
-                    for version in page['Versions']:
-                        if version['Version'] != '$LATEST':
+                    for ver in page['Versions']:
+                        if ver['Version'] != '$LATEST':
                             try:
-                                lambda_client.delete_provisioned_concurrency_config(
+                                await run_boto3(
+                                    lambda_client.delete_provisioned_concurrency_config,
                                     FunctionName=LAMBDA_FUNCTION_NAME,
-                                    Qualifier=version['Version']
+                                    Qualifier=ver['Version']
                                 )
                             except lambda_client.exceptions.ProvisionedConcurrencyConfigNotFoundException:
                                 pass
             except Exception as e:
                 logger.warning(f"Error cleaning up PC configs: {e}")
-            
+
             _last_activity["current_pc"] = 0
             logger.info("Provisioned concurrency disabled")
             return {"success": True, "message": "PC disabled"}
@@ -585,6 +595,9 @@ class HeartbeatResponse(BaseModel):
     timestamp: str
     provisioned_concurrency: int
     status: str
+    target_pc: Optional[int] = None
+    last_activity: Optional[str] = None
+    minutes_since_activity: Optional[float] = None
 
 class PCStatusResponse(BaseModel):
     current_pc: int
@@ -601,21 +614,35 @@ async def user_heartbeat():
     """
     now = datetime.now(timezone.utc)
     _last_activity["timestamp"] = now
-    
+
     # Check if we need to scale up
     current_pc = _last_activity.get("current_pc", 0)
     status = "already_warm"
-    
+
     if current_pc < PC_ACTIVE:
         # Scale up asynchronously (don't block the response)
         asyncio.create_task(scale_up_pc())
         status = "scaling_up"
-    
+
+    # Include full PC status to eliminate separate /pc-status polling
+    last_ts = _last_activity.get("timestamp")
+    minutes_since = None
+    if last_ts:
+        minutes_since = (now - last_ts).total_seconds() / 60
+
+    if last_ts and minutes_since is not None and minutes_since < IDLE_TIMEOUT_MINUTES:
+        target_pc = PC_ACTIVE
+    else:
+        target_pc = PC_IDLE
+
     return HeartbeatResponse(
         received=True,
         timestamp=now.isoformat(),
         provisioned_concurrency=current_pc,
-        status=status
+        status=status,
+        target_pc=target_pc,
+        last_activity=last_ts.isoformat() if last_ts else None,
+        minutes_since_activity=round(minutes_since, 2) if minutes_since else None,
     )
 
 async def scale_up_pc():
