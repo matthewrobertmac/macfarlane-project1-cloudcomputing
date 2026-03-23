@@ -284,7 +284,7 @@ def get_sqs_client():
             region_name=AWS_REGION,
             aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
             aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
-            config=Config(max_pool_connections=25)
+            config=Config(max_pool_connections=50)
         )
     except Exception as e:
         logger.error(f"Failed to create SQS client: {e}")
@@ -443,8 +443,8 @@ async def run_test(request: TestRequest):
                 "slow": len([l for l in latencies if l >= 1000]),
             }
             
-            total_time = sum(latencies) / 1000
-            throughput = len(received_ids) / total_time if total_time > 0 else 0
+            total_time = (time.time() - send_times.get(list(send_times.keys())[0] if send_times else "", time.time())) if send_times else 1
+            throughput = len(received_ids) / max(total_time / 1000, 0.001)
             
             # Calculate latency breakdown by service (estimated based on ULTRA PERFORMANCE architecture)
             avg_latency = stats["avg"]
@@ -645,6 +645,7 @@ async def stream_test(profile: str = "warmup"):
             random.seed(42)
             send_times = {}
             messages = [generate_opportunity() for _ in range(count)]
+            wall_start = time.time()
 
             # Phase 1: Send messages to SQS
             yield _sse_event("status", {"phase": "sending", "message": f"Sending {count} messages to SQS...", "total": count})
@@ -659,17 +660,13 @@ async def stream_test(profile: str = "warmup"):
                 batches.append((batch, entries))
 
             if delay_ms == 0 and count > 10:
-                # PARALLEL SEND — non-blocking via asyncio.to_thread
+                # PARALLEL SEND — non-blocking via asyncio
                 batch_send_time = int(time.time() * 1000)
 
-                def _parallel_send():
-                    from concurrent.futures import ThreadPoolExecutor as TP
-                    with TP(max_workers=min(len(batches), 10)) as pool:
-                        futs = [pool.submit(sqs.send_message_batch, QueueUrl=INPUT_QUEUE_URL, Entries=ent) for _, ent in batches]
-                        for f in futs:
-                            f.result()
+                async def _send_one(ent):
+                    await asyncio.to_thread(sqs.send_message_batch, QueueUrl=INPUT_QUEUE_URL, Entries=ent)
 
-                await asyncio.to_thread(_parallel_send)
+                await asyncio.gather(*[_send_one(ent) for _, ent in batches])
 
                 for batch_msgs, _ in batches:
                     for msg in batch_msgs:
@@ -692,34 +689,53 @@ async def stream_test(profile: str = "warmup"):
                     if delay_ms > 0 and total_sent < count:
                         await asyncio.sleep(delay_ms / 1000)
 
-            # Phase 2: Poll for results and stream live
+            # Phase 2: CONCURRENT polling + BATCH deletion
             yield _sse_event("status", {"phase": "receiving", "message": "Collecting results from pipeline...", "total": count})
 
             received_ids = set()
             all_latencies = []
             poll_start = time.time()
             poll_timeout = 60
-            empty_polls = 0
+            consecutive_empty = 0
+            CONCURRENT_POLLS = 5
+
+            async def _poll_once():
+                """Single non-blocking poll returning (messages_list, receive_time)."""
+                resp = await asyncio.to_thread(
+                    sqs.receive_message,
+                    QueueUrl=RESULTS_QUEUE_URL,
+                    MaxNumberOfMessages=10,
+                    WaitTimeSeconds=1
+                )
+                return resp.get("Messages", []), int(time.time() * 1000)
+
+            async def _batch_delete(handles):
+                """Delete up to 10 messages at once."""
+                if not handles:
+                    return
+                entries = [{"Id": str(i), "ReceiptHandle": h} for i, h in enumerate(handles[:10])]
+                await asyncio.to_thread(
+                    sqs.delete_message_batch,
+                    QueueUrl=RESULTS_QUEUE_URL,
+                    Entries=entries
+                )
 
             while len(received_ids) < count and (time.time() - poll_start) < poll_timeout:
-                try:
-                    response = await asyncio.to_thread(
-                        sqs.receive_message,
-                        QueueUrl=RESULTS_QUEUE_URL,
-                        MaxNumberOfMessages=10,
-                        WaitTimeSeconds=1
-                    )
+                # Launch concurrent polls
+                poll_tasks = [_poll_once() for _ in range(CONCURRENT_POLLS)]
+                results = await asyncio.gather(*poll_tasks, return_exceptions=True)
 
-                    msgs = response.get("Messages", [])
-                    if not msgs:
-                        empty_polls += 1
-                        if empty_polls > 10 and len(received_ids) > 0:
-                            break
+                batch_latencies = []
+                handles_to_delete = []
+                got_any = False
+
+                for result in results:
+                    if isinstance(result, Exception):
                         continue
-
-                    empty_polls = 0
-                    receive_time = int(time.time() * 1000)
-                    batch_latencies = []
+                    msgs, receive_time = result
+                    if not msgs:
+                        continue
+                    got_any = True
 
                     for msg in msgs:
                         try:
@@ -733,33 +749,36 @@ async def stream_test(profile: str = "warmup"):
                                     all_latencies.append(latency)
                                     batch_latencies.append(latency)
 
-                            await asyncio.to_thread(
-                                sqs.delete_message,
-                                QueueUrl=RESULTS_QUEUE_URL,
-                                ReceiptHandle=msg["ReceiptHandle"]
-                            )
+                            handles_to_delete.append(msg["ReceiptHandle"])
                         except Exception:
                             pass
 
-                    if batch_latencies:
-                        yield _sse_event("result_batch", {
-                            "received": len(received_ids),
-                            "total": count,
-                            "new_latencies": [int(l) for l in batch_latencies],
-                            "batch_avg": int(statistics.mean(batch_latencies)),
-                        })
+                # Fire batch deletes in background (don't wait)
+                if handles_to_delete:
+                    for i in range(0, len(handles_to_delete), 10):
+                        chunk = handles_to_delete[i:i + 10]
+                        asyncio.create_task(_batch_delete(chunk))
 
-                except Exception as e:
-                    logger.error(f"SSE poll error: {e}")
-
-                await asyncio.sleep(0.05)
+                if batch_latencies:
+                    consecutive_empty = 0
+                    yield _sse_event("result_batch", {
+                        "received": len(received_ids),
+                        "total": count,
+                        "new_latencies": [int(lat) for lat in batch_latencies],
+                        "batch_avg": int(statistics.mean(batch_latencies)),
+                    })
+                elif not got_any:
+                    consecutive_empty += 1
+                    if consecutive_empty > 8 and len(received_ids) > 0:
+                        break
 
             # Phase 3: Compute and send final stats
+            wall_elapsed = time.time() - wall_start
             if all_latencies:
                 sorted_latencies = sorted(all_latencies)
                 n = len(sorted_latencies)
-                total_time = sum(all_latencies) / 1000
-                throughput = len(received_ids) / total_time if total_time > 0 else 0
+                # CORRECT throughput = messages / wall-clock seconds
+                throughput = len(received_ids) / wall_elapsed if wall_elapsed > 0 else 0
 
                 final_stats = {
                     "min": int(sorted_latencies[0]),
