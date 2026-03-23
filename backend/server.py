@@ -17,6 +17,7 @@ from datetime import datetime, timezone, timedelta
 import boto3
 from concurrent.futures import ThreadPoolExecutor
 import asyncio
+import orjson
 
 # Configure logging first
 logging.basicConfig(
@@ -305,6 +306,29 @@ def get_sqs_client():
         logger.error(f"Failed to create SQS client: {e}")
         return None
 
+
+# ============================================================================
+# STARTUP OPTIMIZATIONS — Thread pool, connection pre-warming
+# ============================================================================
+
+@app.on_event("startup")
+async def startup_optimize():
+    """Pre-warm SQS connections and configure optimized thread pool."""
+    loop = asyncio.get_event_loop()
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=30, thread_name_prefix="sqs"))
+    sqs = get_sqs_client()
+    if sqs:
+        try:
+            await asyncio.to_thread(
+                sqs.get_queue_attributes,
+                QueueUrl=INPUT_QUEUE_URL,
+                AttributeNames=["ApproximateNumberOfMessages"]
+            )
+            logger.info("SQS connection pre-warmed successfully")
+        except Exception as e:
+            logger.warning(f"SQS pre-warm failed (non-critical): {e}")
+
+
 @api_router.post("/warmup", response_model=WarmupResponse)
 async def warmup_lambda():
     """
@@ -322,7 +346,7 @@ async def warmup_lambda():
             opp = generate_opportunity()
             sqs.send_message(
                 QueueUrl=INPUT_QUEUE_URL,
-                MessageBody=json.dumps(opp)
+                MessageBody=orjson.dumps(opp).decode()
             )
         
         # Wait for Lambda to process
@@ -384,7 +408,7 @@ async def run_test(request: TestRequest):
         for i in range(0, len(messages), 10):
             batch = messages[i:i + 10]
             entries = [
-                {"Id": str(idx), "MessageBody": json.dumps(msg)}
+                {"Id": str(idx), "MessageBody": orjson.dumps(msg).decode()}
                 for idx, msg in enumerate(batch)
             ]
             
@@ -420,7 +444,7 @@ async def run_test(request: TestRequest):
                 
                 for msg in msgs:
                     try:
-                        body = json.loads(msg["Body"])
+                        body = orjson.loads(msg["Body"])
                         opp_id = body.get("opportunity_id")
                         
                         if opp_id and opp_id not in received_ids:
@@ -588,7 +612,7 @@ def generate_simulated_results(count: int) -> TestResponse:
 
 def _sse_event(event: str, data: dict) -> str:
     """Format a Server-Sent Event."""
-    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+    return f"event: {event}\ndata: {orjson.dumps(data).decode()}\n\n"
 
 
 def _compute_latency_breakdown(stats, count):
@@ -671,7 +695,7 @@ async def stream_test(profile: str = "warmup"):
             for i in range(0, len(messages), 10):
                 batch = messages[i:i + 10]
                 entries = [
-                    {"Id": str(idx), "MessageBody": json.dumps(msg)}
+                    {"Id": str(idx), "MessageBody": orjson.dumps(msg).decode()}
                     for idx, msg in enumerate(batch)
                 ]
                 batches.append((batch, entries))
@@ -718,7 +742,7 @@ async def stream_test(profile: str = "warmup"):
                 early_batch_latencies = []
                 for raw_msg, recv_time in early_messages:
                     try:
-                        body = json.loads(raw_msg["Body"])
+                        body = orjson.loads(raw_msg["Body"])
                         opp_id = body.get("opportunity_id")
                         if opp_id and opp_id not in received_ids:
                             received_ids.add(opp_id)
@@ -807,7 +831,7 @@ async def stream_test(profile: str = "warmup"):
 
                     for msg in msgs:
                         try:
-                            body = json.loads(msg["Body"])
+                            body = orjson.loads(msg["Body"])
                             opp_id = body.get("opportunity_id")
 
                             if opp_id and opp_id not in received_ids:
@@ -865,11 +889,52 @@ async def stream_test(profile: str = "warmup"):
 
                 latency_breakdown, bottleneck_analysis = _compute_latency_breakdown(final_stats, count)
 
+                # Regression alert / Personal best detection
+                regression_alert = None
+                try:
+                    best_entry = await db.test_history.find(
+                        {"profile": profile, "stats.avg": {"$gt": 0}},
+                        {"_id": 0, "stats.avg": 1, "throughput": 1, "timestamp": 1}
+                    ).sort("stats.avg", 1).limit(1).to_list(1)
+
+                    if best_entry:
+                        best_avg = best_entry[0]["stats"]["avg"]
+                        current_avg = final_stats["avg"]
+                        best_throughput = best_entry[0].get("throughput", 0)
+                        if current_avg <= best_avg:
+                            regression_alert = {
+                                "type": "personal_best",
+                                "current_avg": current_avg,
+                                "previous_best_avg": best_avg,
+                                "improvement_pct": round((1 - current_avg / best_avg) * 100, 1) if best_avg > 0 else 0,
+                                "best_throughput": best_throughput,
+                            }
+                        elif current_avg > best_avg * 1.2:
+                            regression_alert = {
+                                "type": "regression",
+                                "current_avg": current_avg,
+                                "best_avg": best_avg,
+                                "regression_pct": round((current_avg / best_avg - 1) * 100, 1),
+                                "best_timestamp": best_entry[0].get("timestamp", ""),
+                                "best_throughput": best_throughput,
+                            }
+                        else:
+                            regression_alert = {
+                                "type": "normal",
+                                "current_avg": current_avg,
+                                "best_avg": best_avg,
+                                "delta_pct": round((current_avg / best_avg - 1) * 100, 1),
+                                "best_throughput": best_throughput,
+                            }
+                except Exception as e:
+                    logger.warning(f"Regression check failed: {e}")
+
                 yield _sse_event("stats", {
                     "stats": final_stats,
                     "distribution": distribution,
                     "latency_breakdown": latency_breakdown,
                     "bottleneck_analysis": bottleneck_analysis,
+                    "regression_alert": regression_alert,
                 })
 
                 # Save to history
@@ -884,6 +949,7 @@ async def stream_test(profile: str = "warmup"):
                     "throughput": round(throughput, 1),
                     "latency_breakdown": latency_breakdown,
                     "bottleneck_analysis": bottleneck_analysis,
+                    "regression_alert": regression_alert,
                 }
                 await db.test_history.insert_one(history_entry)
 

@@ -280,6 +280,7 @@ function App() {
   const [calcAdCat, setCalcAdCat] = useState("sportswear");
   const [calcHour, setCalcHour] = useState(20);
   const [calcDevice, setCalcDevice] = useState("mobile");
+  const [regressionAlert, setRegressionAlert] = useState(null);
   const testRef = useRef(null);
 
   // Heartbeat
@@ -408,6 +409,7 @@ function App() {
     setTestState("running");
     setLiveMetrics([]);
     setTestResults(null);
+    setRegressionAlert(null);
     setStreamProgress({ phase: "connecting", sent: 0, received: 0, total: profiles[testProfile].count });
 
     const allLatencies = [];
@@ -445,6 +447,7 @@ function App() {
           bottleneck_analysis: data.bottleneck_analysis,
           throughput: data.stats.throughput,
         }));
+        if (data.regression_alert) setRegressionAlert(data.regression_alert);
       });
 
       eventSource.addEventListener("complete", (e) => {
@@ -864,6 +867,70 @@ function App() {
                       </div>
                     ))}
                   </div>
+
+                  {/* Performance Regression Alert / Personal Best */}
+                  {regressionAlert && (
+                    <div
+                      className={`rounded-xl p-4 border flex items-start gap-3 ${
+                        regressionAlert.type === "personal_best"
+                          ? "bg-emerald-500/5 border-emerald-500/20"
+                          : regressionAlert.type === "regression"
+                          ? "bg-red-500/5 border-red-500/20"
+                          : "bg-white/[0.02] border-white/10"
+                      }`}
+                      data-testid="regression-alert"
+                    >
+                      {regressionAlert.type === "personal_best" ? (
+                        <>
+                          <div className="w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
+                            <Award className="w-5 h-5 text-emerald-400" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-emerald-400 text-sm font-semibold">Personal Best!</p>
+                            <p className="text-white/50 text-xs mt-0.5">
+                              New record for <span className="text-white/70 font-medium">{testProfile}</span> profile:
+                              <span className="text-emerald-400 font-mono font-bold ml-1">{regressionAlert.current_avg}ms</span>
+                              {regressionAlert.improvement_pct > 0 && (
+                                <span className="text-emerald-400/60 ml-1">({regressionAlert.improvement_pct}% faster than previous best of {regressionAlert.previous_best_avg}ms)</span>
+                              )}
+                            </p>
+                          </div>
+                        </>
+                      ) : regressionAlert.type === "regression" ? (
+                        <>
+                          <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center flex-shrink-0">
+                            <AlertCircle className="w-5 h-5 text-red-400" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-red-400 text-sm font-semibold">Performance Regression Detected</p>
+                            <p className="text-white/50 text-xs mt-0.5">
+                              Current avg <span className="text-red-400 font-mono font-bold">{regressionAlert.current_avg}ms</span> is
+                              <span className="text-red-400 font-mono ml-1">+{regressionAlert.regression_pct}%</span> slower than
+                              best of <span className="text-white/70 font-mono">{regressionAlert.best_avg}ms</span>
+                              {regressionAlert.best_timestamp && (
+                                <span className="text-white/30 ml-1">(set {new Date(regressionAlert.best_timestamp).toLocaleDateString()})</span>
+                              )}
+                            </p>
+                            <p className="text-white/30 text-[10px] mt-1">Possible causes: cold Lambda, SQS queue backlog, network variance. Try running warmup first.</p>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center flex-shrink-0">
+                            <CheckCircle2 className="w-5 h-5 text-white/40" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white/60 text-sm font-medium">Within Expected Range</p>
+                            <p className="text-white/40 text-xs mt-0.5">
+                              Current <span className="font-mono">{regressionAlert.current_avg}ms</span> vs
+                              best <span className="font-mono">{regressionAlert.best_avg}ms</span>
+                              <span className="text-white/25 ml-1">({regressionAlert.delta_pct > 0 ? "+" : ""}{regressionAlert.delta_pct}%)</span>
+                            </p>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
 
                   {/* Optimization Journey — Before/After comparison */}
                   <div className="rounded-xl p-5 border" style={{ background: C.cardBg, borderColor: `${C.blue}30` }} data-testid="optimization-journey">
