@@ -276,13 +276,15 @@ def generate_opportunity():
     }
 
 def get_sqs_client():
-    """Get SQS client with credentials."""
+    """Get SQS client with credentials and larger connection pool."""
     try:
+        from botocore.config import Config
         return boto3.client(
             "sqs",
             region_name=AWS_REGION,
             aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
-            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY")
+            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+            config=Config(max_pool_connections=25)
         )
     except Exception as e:
         logger.error(f"Failed to create SQS client: {e}")
@@ -644,7 +646,7 @@ async def stream_test(profile: str = "warmup"):
             send_times = {}
             messages = [generate_opportunity() for _ in range(count)]
 
-            # Phase 1: Send messages to SQS — PARALLEL for burst, sequential for delayed
+            # Phase 1: Send messages to SQS
             yield _sse_event("status", {"phase": "sending", "message": f"Sending {count} messages to SQS...", "total": count})
 
             batches = []
@@ -657,19 +659,18 @@ async def stream_test(profile: str = "warmup"):
                 batches.append((batch, entries))
 
             if delay_ms == 0 and count > 10:
-                # PARALLEL SEND — all batches at once for burst mode
-                from concurrent.futures import ThreadPoolExecutor as TP, as_completed
+                # PARALLEL SEND — non-blocking via asyncio.to_thread
                 batch_send_time = int(time.time() * 1000)
 
-                def _send_batch(entries):
-                    sqs.send_message_batch(QueueUrl=INPUT_QUEUE_URL, Entries=entries)
+                def _parallel_send():
+                    from concurrent.futures import ThreadPoolExecutor as TP
+                    with TP(max_workers=min(len(batches), 10)) as pool:
+                        futs = [pool.submit(sqs.send_message_batch, QueueUrl=INPUT_QUEUE_URL, Entries=ent) for _, ent in batches]
+                        for f in futs:
+                            f.result()
 
-                with TP(max_workers=min(len(batches), 20)) as pool:
-                    futures = {pool.submit(_send_batch, ent): msgs for msgs, ent in batches}
-                    for f in as_completed(futures):
-                        f.result()
+                await asyncio.to_thread(_parallel_send)
 
-                # All sent simultaneously — same timestamp
                 for batch_msgs, _ in batches:
                     for msg in batch_msgs:
                         send_times[msg["opportunity_id"]] = batch_send_time
@@ -680,7 +681,7 @@ async def stream_test(profile: str = "warmup"):
                 total_sent = 0
                 for batch_msgs, entries in batches:
                     batch_send_time = int(time.time() * 1000)
-                    sqs.send_message_batch(QueueUrl=INPUT_QUEUE_URL, Entries=entries)
+                    await asyncio.to_thread(sqs.send_message_batch, QueueUrl=INPUT_QUEUE_URL, Entries=entries)
 
                     for msg in batch_msgs:
                         send_times[msg["opportunity_id"]] = batch_send_time
@@ -691,7 +692,7 @@ async def stream_test(profile: str = "warmup"):
                     if delay_ms > 0 and total_sent < count:
                         await asyncio.sleep(delay_ms / 1000)
 
-            # Phase 2: Poll for results — fast short-polling for burst
+            # Phase 2: Poll for results and stream live
             yield _sse_event("status", {"phase": "receiving", "message": "Collecting results from pipeline...", "total": count})
 
             received_ids = set()
@@ -699,137 +700,59 @@ async def stream_test(profile: str = "warmup"):
             poll_start = time.time()
             poll_timeout = 60
             empty_polls = 0
-            # Use long polling for comprehensive result pickup
-            wait_time = 2
 
-            # For burst: use parallel polling threads for faster result collection
-            use_parallel_poll = (delay_ms == 0 and count > 50)
+            while len(received_ids) < count and (time.time() - poll_start) < poll_timeout:
+                try:
+                    response = await asyncio.to_thread(
+                        sqs.receive_message,
+                        QueueUrl=RESULTS_QUEUE_URL,
+                        MaxNumberOfMessages=10,
+                        WaitTimeSeconds=1
+                    )
 
-            if use_parallel_poll:
-                import threading
-                lock = threading.Lock()
-                poll_active = [True]
+                    msgs = response.get("Messages", [])
+                    if not msgs:
+                        empty_polls += 1
+                        if empty_polls > 10 and len(received_ids) > 0:
+                            break
+                        continue
 
-                def _poll_worker():
-                    """Worker thread that polls SQS and accumulates results."""
-                    while poll_active[0]:
+                    empty_polls = 0
+                    receive_time = int(time.time() * 1000)
+                    batch_latencies = []
+
+                    for msg in msgs:
                         try:
-                            resp = sqs.receive_message(
+                            body = json.loads(msg["Body"])
+                            opp_id = body.get("opportunity_id")
+
+                            if opp_id and opp_id not in received_ids:
+                                received_ids.add(opp_id)
+                                if opp_id in send_times:
+                                    latency = receive_time - send_times[opp_id]
+                                    all_latencies.append(latency)
+                                    batch_latencies.append(latency)
+
+                            await asyncio.to_thread(
+                                sqs.delete_message,
                                 QueueUrl=RESULTS_QUEUE_URL,
-                                MaxNumberOfMessages=10,
-                                WaitTimeSeconds=1
+                                ReceiptHandle=msg["ReceiptHandle"]
                             )
-                            msgs = resp.get("Messages", [])
-                            if not msgs:
-                                continue
-                            receive_time = int(time.time() * 1000)
-                            batch_lat = []
-                            for msg in msgs:
-                                try:
-                                    body = json.loads(msg["Body"])
-                                    opp_id = body.get("opportunity_id")
-                                    with lock:
-                                        if opp_id and opp_id not in received_ids:
-                                            received_ids.add(opp_id)
-                                            if opp_id in send_times:
-                                                lat = receive_time - send_times[opp_id]
-                                                all_latencies.append(lat)
-                                                batch_lat.append(lat)
-                                    sqs.delete_message(QueueUrl=RESULTS_QUEUE_URL, ReceiptHandle=msg["ReceiptHandle"])
-                                except Exception:
-                                    pass
                         except Exception:
                             pass
 
-                # Start 4 parallel poll workers
-                poll_threads = []
-                for _ in range(4):
-                    t = threading.Thread(target=_poll_worker, daemon=True)
-                    t.start()
-                    poll_threads.append(t)
-
-                last_streamed = 0
-                while len(received_ids) < count and (time.time() - poll_start) < poll_timeout:
-                    await asyncio.sleep(0.3)
-                    with lock:
-                        current_count = len(received_ids)
-                        if current_count > last_streamed:
-                            new_lats = all_latencies[last_streamed:current_count]
-                            last_streamed = current_count
-                        else:
-                            new_lats = []
-                    if new_lats:
+                    if batch_latencies:
                         yield _sse_event("result_batch", {
-                            "received": current_count,
+                            "received": len(received_ids),
                             "total": count,
-                            "new_latencies": [int(l) for l in new_lats],
-                            "batch_avg": int(statistics.mean(new_lats)),
+                            "new_latencies": [int(l) for l in batch_latencies],
+                            "batch_avg": int(statistics.mean(batch_latencies)),
                         })
-                        empty_polls = 0
-                    else:
-                        empty_polls += 1
-                    if current_count >= count:
-                        break
-                    # Be patient — wait up to 15 seconds of no new results before giving up
-                    if empty_polls > 50:
-                        break
 
-                poll_active[0] = False
-                for t in poll_threads:
-                    t.join(timeout=2)
-            else:
-                # Standard sequential polling for non-burst profiles
-                while len(received_ids) < count and (time.time() - poll_start) < poll_timeout:
-                    try:
-                        response = sqs.receive_message(
-                            QueueUrl=RESULTS_QUEUE_URL,
-                            MaxNumberOfMessages=10,
-                            WaitTimeSeconds=wait_time
-                        )
+                except Exception as e:
+                    logger.error(f"SSE poll error: {e}")
 
-                        msgs = response.get("Messages", [])
-                        if not msgs:
-                            empty_polls += 1
-                            if empty_polls > 5 and len(received_ids) > 0:
-                                break
-                            continue
-
-                        empty_polls = 0
-                        receive_time = int(time.time() * 1000)
-                        batch_latencies = []
-
-                        for msg in msgs:
-                            try:
-                                body = json.loads(msg["Body"])
-                                opp_id = body.get("opportunity_id")
-
-                                if opp_id and opp_id not in received_ids:
-                                    received_ids.add(opp_id)
-                                    if opp_id in send_times:
-                                        latency = receive_time - send_times[opp_id]
-                                        all_latencies.append(latency)
-                                        batch_latencies.append(latency)
-
-                                sqs.delete_message(
-                                    QueueUrl=RESULTS_QUEUE_URL,
-                                    ReceiptHandle=msg["ReceiptHandle"]
-                                )
-                            except Exception:
-                                pass
-
-                        # Stream this batch of results
-                        if batch_latencies:
-                            yield _sse_event("result_batch", {
-                                "received": len(received_ids),
-                                "total": count,
-                                "new_latencies": [int(l) for l in batch_latencies],
-                                "batch_avg": int(statistics.mean(batch_latencies)),
-                            })
-
-                    except Exception as e:
-                        logger.error(f"SSE poll error: {e}")
-
-                    await asyncio.sleep(0.05)
+                await asyncio.sleep(0.05)
 
             # Phase 3: Compute and send final stats
             if all_latencies:
