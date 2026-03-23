@@ -865,6 +865,50 @@ function App() {
                     ))}
                   </div>
 
+                  {/* Optimization Journey — Before/After comparison */}
+                  <div className="rounded-xl p-5 border" style={{ background: C.cardBg, borderColor: `${C.blue}30` }} data-testid="optimization-journey">
+                    <h4 className="text-white text-sm font-medium mb-1 flex items-center gap-2">
+                      <TrendingUp className="w-4 h-4" style={{ color: "#10b981" }} /> Optimization Journey
+                    </h4>
+                    <p className="text-white/30 text-xs mb-4">End-to-end latency improvements across optimization phases (burst 500 msgs)</p>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      {[
+                        { label: "Original", avg: 11026, p95: 19540, sub: "Baseline (no opts)", color: "#ef4444" },
+                        { label: "+ Concurrency", avg: 2896, p95: 5051, sub: "PC=50, Reserved=500", color: "#f59e0b" },
+                        { label: "+ Throughput", avg: 987, p95: 1347, sub: "Parallel I/O, Batch", color: C.blue },
+                        { label: "Current Run", avg: testResults.stats.avg, p95: testResults.stats.p95, sub: `${testProfile} profile`, color: "#10b981", current: true },
+                      ].map((stage, i) => {
+                        const improvement = i > 0 ? Math.round((1 - stage.avg / 11026) * 100) : 0;
+                        return (
+                          <div key={i} className={`rounded-lg p-3 border ${stage.current ? "ring-1 ring-emerald-500/30 border-emerald-500/20 bg-emerald-500/5" : "border-white/5 bg-white/[0.02]"}`}>
+                            <div className="flex items-center justify-between mb-1">
+                              <p className="text-white/40 text-[10px] uppercase tracking-wider">{stage.label}</p>
+                              {i > 0 && <span className="text-emerald-400 text-[9px] font-mono">-{improvement}%</span>}
+                            </div>
+                            <p className="text-2xl font-mono font-bold" style={{ color: stage.color }}>
+                              {stage.avg.toLocaleString()}<span className="text-xs text-white/30 ml-0.5">ms</span>
+                            </p>
+                            <p className="text-white/25 text-[10px] mt-0.5 font-mono">p95: {stage.p95.toLocaleString()}ms</p>
+                            <p className="text-white/20 text-[10px]">{stage.sub}</p>
+                            <div className="w-full h-1 rounded-full bg-white/5 mt-2">
+                              <div className="h-1 rounded-full transition-all" style={{ width: `${Math.min(100, (stage.avg / 11026) * 100)}%`, backgroundColor: stage.color }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {/* Summary line */}
+                    <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/5">
+                      <div className="flex items-center gap-2">
+                        <ArrowRight className="w-3 h-3 text-white/20" />
+                        <span className="text-white/30 text-[10px]">Original → Current</span>
+                      </div>
+                      <span className="text-emerald-400 text-xs font-mono font-bold">
+                        {testResults.stats.avg < 11026 ? `-${Math.round((1 - testResults.stats.avg / 11026) * 100)}% avg latency` : "Measuring..."}
+                      </span>
+                    </div>
+                  </div>
+
                   {/* Charts grid */}
                   <div className="grid lg:grid-cols-3 gap-4">
                     {/* Live latency chart */}

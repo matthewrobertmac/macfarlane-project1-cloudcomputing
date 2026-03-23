@@ -275,17 +275,32 @@ def generate_opportunity():
         ],
     }
 
+# Optimized botocore config — TCP keepalive, aggressive timeouts, large connection pool
+from botocore.config import Config as BotoConfig
+
+_BOTO_CONFIG = BotoConfig(
+    max_pool_connections=100,
+    connect_timeout=3,
+    read_timeout=5,
+    retries={"max_attempts": 1, "mode": "standard"},
+    tcp_keepalive=True,
+)
+_sqs_client_cache = None
+
 def get_sqs_client():
-    """Get SQS client with credentials and larger connection pool."""
+    """Get SQS client — cached singleton with optimized connection pooling."""
+    global _sqs_client_cache
+    if _sqs_client_cache is not None:
+        return _sqs_client_cache
     try:
-        from botocore.config import Config
-        return boto3.client(
+        _sqs_client_cache = boto3.client(
             "sqs",
             region_name=AWS_REGION,
             aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
             aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
-            config=Config(max_pool_connections=50)
+            config=_BOTO_CONFIG,
         )
+        return _sqs_client_cache
     except Exception as e:
         logger.error(f"Failed to create SQS client: {e}")
         return None
@@ -644,6 +659,8 @@ async def stream_test(profile: str = "warmup"):
         try:
             random.seed(42)
             send_times = {}
+            received_ids = set()
+            all_latencies = []
             messages = [generate_opportunity() for _ in range(count)]
             wall_start = time.time()
 
@@ -660,19 +677,71 @@ async def stream_test(profile: str = "warmup"):
                 batches.append((batch, entries))
 
             if delay_ms == 0 and count > 10:
-                # PARALLEL SEND — non-blocking via asyncio
-                batch_send_time = int(time.time() * 1000)
+                # OPTIMIZED PARALLEL SEND — per-batch timestamps + overlap polling
+                early_messages = []
+                pre_poll_stop = asyncio.Event()
 
-                async def _send_one(ent):
+                async def _pre_poll():
+                    """Poll for early results while sends are still in-flight."""
+                    while not pre_poll_stop.is_set():
+                        try:
+                            resp = await asyncio.to_thread(
+                                sqs.receive_message,
+                                QueueUrl=RESULTS_QUEUE_URL,
+                                MaxNumberOfMessages=10,
+                                WaitTimeSeconds=0,
+                            )
+                            recv_t = int(time.time() * 1000)
+                            for m in resp.get("Messages", []):
+                                early_messages.append((m, recv_t))
+                        except Exception:
+                            pass
+                        await asyncio.sleep(0.02)
+
+                pre_poll_task = asyncio.create_task(_pre_poll())
+
+                async def _send_batch(batch_msgs, ent):
+                    t = int(time.time() * 1000)
                     await asyncio.to_thread(sqs.send_message_batch, QueueUrl=INPUT_QUEUE_URL, Entries=ent)
-
-                await asyncio.gather(*[_send_one(ent) for _, ent in batches])
-
-                for batch_msgs, _ in batches:
                     for msg in batch_msgs:
-                        send_times[msg["opportunity_id"]] = batch_send_time
+                        send_times[msg["opportunity_id"]] = t
+
+                await asyncio.gather(*[_send_batch(bm, ent) for bm, ent in batches])
 
                 yield _sse_event("send_progress", {"sent": count, "total": count})
+
+                # Stop pre-poller and process early results
+                pre_poll_stop.set()
+                await pre_poll_task
+
+                early_handles = []
+                early_batch_latencies = []
+                for raw_msg, recv_time in early_messages:
+                    try:
+                        body = json.loads(raw_msg["Body"])
+                        opp_id = body.get("opportunity_id")
+                        if opp_id and opp_id not in received_ids:
+                            received_ids.add(opp_id)
+                            if opp_id in send_times:
+                                lat = recv_time - send_times[opp_id]
+                                all_latencies.append(lat)
+                                early_batch_latencies.append(lat)
+                        early_handles.append(raw_msg["ReceiptHandle"])
+                    except Exception:
+                        pass
+
+                for i in range(0, len(early_handles), 10):
+                    chunk = early_handles[i:i + 10]
+                    del_ent = [{"Id": str(j), "ReceiptHandle": h} for j, h in enumerate(chunk)]
+                    asyncio.create_task(asyncio.to_thread(sqs.delete_message_batch, QueueUrl=RESULTS_QUEUE_URL, Entries=del_ent))
+
+                if early_batch_latencies:
+                    yield _sse_event("result_batch", {
+                        "received": len(received_ids),
+                        "total": count,
+                        "new_latencies": [int(l) for l in early_batch_latencies],
+                        "batch_avg": int(statistics.mean(early_batch_latencies)),
+                    })
             else:
                 # SEQUENTIAL SEND — with delay between batches
                 total_sent = 0
@@ -692,20 +761,18 @@ async def stream_test(profile: str = "warmup"):
             # Phase 2: CONCURRENT polling + BATCH deletion
             yield _sse_event("status", {"phase": "receiving", "message": "Collecting results from pipeline...", "total": count})
 
-            received_ids = set()
-            all_latencies = []
             poll_start = time.time()
             poll_timeout = 60
             consecutive_empty = 0
-            CONCURRENT_POLLS = 5
+            CONCURRENT_POLLS = 10
 
-            async def _poll_once():
+            async def _poll_once(wait_s=0):
                 """Single non-blocking poll returning (messages_list, receive_time)."""
                 resp = await asyncio.to_thread(
                     sqs.receive_message,
                     QueueUrl=RESULTS_QUEUE_URL,
                     MaxNumberOfMessages=10,
-                    WaitTimeSeconds=1
+                    WaitTimeSeconds=wait_s
                 )
                 return resp.get("Messages", []), int(time.time() * 1000)
 
@@ -721,8 +788,9 @@ async def stream_test(profile: str = "warmup"):
                 )
 
             while len(received_ids) < count and (time.time() - poll_start) < poll_timeout:
-                # Launch concurrent polls
-                poll_tasks = [_poll_once() for _ in range(CONCURRENT_POLLS)]
+                # Adaptive wait: short poll when results flowing, long poll when dry
+                wait_s = 0 if consecutive_empty < 3 else 1
+                poll_tasks = [_poll_once(wait_s) for _ in range(CONCURRENT_POLLS)]
                 results = await asyncio.gather(*poll_tasks, return_exceptions=True)
 
                 batch_latencies = []
@@ -769,7 +837,7 @@ async def stream_test(profile: str = "warmup"):
                     })
                 elif not got_any:
                     consecutive_empty += 1
-                    if consecutive_empty > 8 and len(received_ids) > 0:
+                    if consecutive_empty > 15 and len(received_ids) > 0:
                         break
 
             # Phase 3: Compute and send final stats
