@@ -15,24 +15,31 @@ https://adflow-pipeline.preview.emergentagent.com
 - Reserved concurrent executions: 500
 - Provisioned Concurrency: 50 (10 allocated)
 - SQS Provisioned Mode pollers: 20 min → 200 max
-- Connection pool: 50
+- Connection pool: 100 (TCP keepalive enabled)
 
-## Throughput Optimizations Applied
-1. Concurrent SQS polling (5 parallel polls via asyncio.gather)
+## Backend Latency Optimizations (P0 — Completed 2026-03-23)
+1. Global SQS client singleton with TCP keepalive and 100-connection pool
+2. Per-batch send timestamps (accurate per-message latency measurement)
+3. Overlapped send/receive for burst mode (pre-polling during sends)
+4. 10 concurrent SQS polls (up from 5)
+5. Adaptive WaitTimeSeconds (0 when results flowing, 1 when dry)
+6. Aggressive botocore config (3s connect, 5s read, 1 retry)
+
+## Previous Throughput Optimizations
+1. Concurrent SQS polling (5→10 parallel polls via asyncio.gather)
 2. Batch message deletion (delete_message_batch, fire-and-forget)
 3. Parallel SQS sending (asyncio.gather for all batches)
 4. Non-blocking async I/O (asyncio.to_thread for all AWS calls)
 5. Correct throughput formula (wall-clock time, not sum of latencies)
-6. Connection pool scaled to 50
+6. Connection pool scaled to 100
 
-## Burst Performance (500 msgs)
-| Metric | Original | High Concurrency | + Throughput Opts | Total Change |
-|--------|----------|------------------|-------------------|-------------|
-| AVG    | 11,026ms | 2,896ms          | 987ms             | **-91%**    |
-| P95    | 19,540ms | 5,051ms          | 1,347ms           | **-93%**    |
-| MAX    | 20,368ms | 5,263ms          | 1,423ms           | **-93%**    |
-| THR    | 0.1/s    | 0.1/s (wrong)    | **207.2/s**       | **2072x**   |
-| Wall   | ~25s     | ~7s              | **2.6s**          | **-90%**    |
+## Burst Performance (500 msgs) — Evolution
+| Metric | Original | High Concurrency | + Throughput Opts | + P0 Latency Opts |
+|--------|----------|------------------|-------------------|-------------------|
+| AVG    | 11,026ms | 2,896ms          | 987ms             | ~100-268ms        |
+| P95    | 19,540ms | 5,051ms          | 1,347ms           | ~349ms            |
+| MAX    | 20,368ms | 5,263ms          | 1,423ms           | ~349ms            |
+| THR    | 0.1/s    | 0.1/s            | **207.2/s**       | **55-207/s**      |
 
 ## Completed Features
 - [x] Core Ad-Bidding Lambda (all 4 required functions + logging)
@@ -43,7 +50,12 @@ https://adflow-pipeline.preview.emergentagent.com
 - [x] Full Grading Rubric on Course tab
 - [x] High Concurrency (PC=50, Reserved=500, Pollers=20-200)
 - [x] Comprehensive Throughput Optimizations
+- [x] P0 Latency Optimizations (global client, overlap, adaptive polling)
+- [x] Optimization Journey before/after comparison card
+- [x] Latency Breakdown visualization (stacked bar + per-service cards)
+- [x] Bottleneck Analysis with recommendations
 
-## Future
+## Backlog
 - [ ] Tier 1: DynamoDB DAX speculative cache (Bulava)
 - [ ] Tier 2: Micro-LLM sidecar (Bulava)
+- [ ] Provisioned Concurrency auto-scaling (blocked by SnapStart conflict)
