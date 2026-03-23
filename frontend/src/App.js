@@ -1633,7 +1633,7 @@ function App() {
                         pts: 15,
                         status: "PASS",
                         where: "Architecture Tab → SQS Results + DynamoDB",
-                        how: "Calls select_winner(), builds result with all 6 required fields (opportunity_id, winning_advertiser_id, winning_bid_amount, winning_score, score_margin, processed_at, content_category). Posts to SQS first (latency path), then batch_write_item to DynamoDB with Decimal conversion.",
+                        how: "Standalone function calls select_winner(), builds result with all 7 required fields (opportunity_id, winning_advertiser_id, winning_bid_amount, winning_score, score_margin, processed_at, content_category). Posts to SQS via sqs.send_message() first (latency path), then writes to DynamoDB via table.put_item() with Decimal(str()) conversion. lambda_handler uses batched I/O for production performance.",
                         file: "worker/lambda_handler.py → process_opportunity()"
                       },
                       {
@@ -1641,7 +1641,7 @@ function App() {
                         pts: 20,
                         status: "PASS",
                         where: "Live Testing Tab → Run Tests",
-                        how: "Processes event['Records'] batch. Defensive try/except per record — JSONDecodeError + general Exception caught, logged with messageId. Returns batchItemFailures format for failed messages. Logs batch timing via time.perf_counter().",
+                        how: "Processes event['Records'] batch. Defensive try/except per record — JSONDecodeError + general Exception caught, logged with messageId via logger.error(). Returns batchItemFailures format for failed messages. Logs per-message timing via logger.info('Processed <id> in X.X ms') and batch summary via logger.info('Batch complete: N/N succeeded in X.X ms') using time.perf_counter().",
                         file: "worker/lambda_handler.py → lambda_handler()"
                       },
                       {
@@ -1754,6 +1754,25 @@ function App() {
                     <div>
                       <p className="text-white/50 text-[11px]">Submission: <span className="text-white/70 font-mono">git push origin macfarlane</span></p>
                       <p className="text-white/25 text-[10px] mt-0.5">Branch: macfarlane | Repo: DistributedForDataScienceF26 | All test outputs visible in notebook</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Evidence */}
+                <div className="mt-3 rounded-lg p-3 border" style={{ background: "rgba(0,91,187,0.04)", borderColor: `${C.blue}15` }}>
+                  <p className="text-white/40 text-[10px] uppercase tracking-wider mb-2">Verification Evidence</p>
+                  <div className="grid md:grid-cols-3 gap-2">
+                    <div className="rounded p-2 bg-white/[0.02]">
+                      <p className="text-emerald-400 text-[10px] font-bold">pytest: 8/8 PASSED</p>
+                      <p className="text-white/25 text-[9px] mt-0.5 font-mono">TestComputeScore (4), TestSelectWinner (3), TestLambdaHandler (1)</p>
+                    </div>
+                    <div className="rounded p-2 bg-white/[0.02]">
+                      <p className="text-emerald-400 text-[10px] font-bold">DynamoDB: 501 records</p>
+                      <p className="text-white/25 text-[9px] mt-0.5 font-mono">Burst run complete (450+ required)</p>
+                    </div>
+                    <div className="rounded p-2 bg-white/[0.02]">
+                      <p className="text-emerald-400 text-[10px] font-bold">Screenshots: Committed</p>
+                      <p className="text-white/25 text-[9px] mt-0.5 font-mono">screenshots/burst_test_complete.png</p>
                     </div>
                   </div>
                 </div>

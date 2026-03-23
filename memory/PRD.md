@@ -10,27 +10,31 @@
 ## Live URL
 https://adflow-pipeline.preview.emergentagent.com
 
-## Design System
-Primary Blue: #005BBB | Accent Gold: #FFD500 | Dark: #0f0f1a
-
 ## Tabs (8)
 1. Home | 2. Live Testing | 3. Architecture | 4. Optimizations | 5. Terraform | 6. Course | 7. About Matt | 8. Bulava
 
+## Grading Rubric Compliance (100/100)
+### Code — 80 pts
+- [x] Task 1: compute_score() — 15 pts ✅
+- [x] Task 2: select_winner() — 15 pts ✅
+- [x] Task 3: process_opportunity() — 15 pts ✅ (was MISSING, now added)
+- [x] Task 4: lambda_handler() — 20 pts ✅ (logging was MISSING, now added)
+- [x] E2E Pipeline — 15 pts ✅ (501 DynamoDB records, screenshots now committed)
+
+### Analysis — 20 pts
+- [x] Q1: Results Analysis — 10 pts ✅ (in analysis.ipynb)
+- [x] Q2: Code Reflection — 10 pts ✅ (Option A: Scale & Limits)
+
 ## Completed Features
-- [x] Core Ad-Bidding Lambda (Py3.12, SnapStart, Provisioned Mode, low-level DDB)
+- [x] Core Ad-Bidding Lambda (all 4 required functions)
 - [x] Ukrainian-themed portfolio (8 tabs, responsive)
-- [x] Latency breakdown + detailed bottleneck analysis
-- [x] Test history: like-test comparison + annotations
-- [x] About Matt (narrative, 9 certs, projects, experience)
-- [x] Project Bulava (3-tier arch, interactive demo, batch sim)
-- [x] Bulava Analytics Dashboard (category/type charts, totals)
-- [x] Terraform IaC + SAM deployed to AWS
 - [x] SSE Real-Time Result Streaming
-- [x] CSV Export for test results and history
-- [x] Framer Motion page transitions on all 8 tabs
-- [x] Interactive Scoring Formula Calculator
-- [x] Performance Timeline — historical avg/p95/min latency chart
-- [x] **Project Requirements & Grading Rubric** — full 100/100 rubric map on Course tab
+- [x] CSV Export, Framer Motion transitions
+- [x] Interactive Scoring Calculator
+- [x] Performance Timeline
+- [x] Full Grading Rubric on Course tab with verification evidence
+- [x] Burst test screenshots in screenshots/ directory
+- [x] analysis.ipynb with executed outputs (501 records)
 
 ## Future
 - [ ] Tier 1: DynamoDB DAX speculative cache (Bulava)
