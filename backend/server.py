@@ -686,6 +686,34 @@ async def stream_test(profile: str = "warmup"):
             received_ids = set()
             all_latencies = []
             messages = [generate_opportunity() for _ in range(count)]
+            serialized_bodies = [orjson.dumps(msg).decode() for msg in messages]
+
+            # Phase 0: Quick drain of stale results for consistency
+            drain_count = 0
+            drain_deadline = time.time() + 0.5
+            while time.time() < drain_deadline:
+                drain_tasks = [asyncio.to_thread(
+                    sqs.receive_message, QueueUrl=RESULTS_QUEUE_URL,
+                    MaxNumberOfMessages=10, WaitTimeSeconds=0
+                ) for _ in range(3)]
+                drain_results = await asyncio.gather(*drain_tasks, return_exceptions=True)
+                any_found = False
+                for dr in drain_results:
+                    if isinstance(dr, Exception):
+                        continue
+                    stale = dr.get("Messages", [])
+                    if stale:
+                        any_found = True
+                        drain_count += len(stale)
+                        d_ent = [{"Id": str(j), "ReceiptHandle": m["ReceiptHandle"]} for j, m in enumerate(stale)]
+                        asyncio.create_task(asyncio.to_thread(
+                            sqs.delete_message_batch, QueueUrl=RESULTS_QUEUE_URL, Entries=d_ent
+                        ))
+                if not any_found:
+                    break
+            if drain_count > 0:
+                logger.info(f"Drained {drain_count} stale messages from results queue")
+
             wall_start = time.time()
 
             # Phase 1: Send messages to SQS
@@ -694,9 +722,10 @@ async def stream_test(profile: str = "warmup"):
             batches = []
             for i in range(0, len(messages), 10):
                 batch = messages[i:i + 10]
+                bodies = serialized_bodies[i:i + 10]
                 entries = [
-                    {"Id": str(idx), "MessageBody": orjson.dumps(msg).decode()}
-                    for idx, msg in enumerate(batch)
+                    {"Id": str(idx), "MessageBody": bodies[idx]}
+                    for idx in range(len(batch))
                 ]
                 batches.append((batch, entries))
 
@@ -812,9 +841,11 @@ async def stream_test(profile: str = "warmup"):
                 )
 
             while len(received_ids) < count and (time.time() - poll_start) < poll_timeout:
-                # Adaptive wait: short poll when results flowing, long poll when dry
+                # Adaptive wait + adaptive poll count (scale down near completion)
+                remaining = count - len(received_ids)
+                effective_polls = min(CONCURRENT_POLLS, max(2, remaining // 5 + 1))
                 wait_s = 0 if consecutive_empty < 3 else 1
-                poll_tasks = [_poll_once(wait_s) for _ in range(CONCURRENT_POLLS)]
+                poll_tasks = [_poll_once(wait_s) for _ in range(effective_polls)]
                 results = await asyncio.gather(*poll_tasks, return_exceptions=True)
 
                 batch_latencies = []
@@ -859,6 +890,8 @@ async def stream_test(profile: str = "warmup"):
                         "new_latencies": [int(lat) for lat in batch_latencies],
                         "batch_avg": int(statistics.mean(batch_latencies)),
                     })
+                    if len(received_ids) >= count:
+                        break  # All messages received — exit immediately
                 elif not got_any:
                     consecutive_empty += 1
                     if consecutive_empty > 15 and len(received_ids) > 0:
@@ -1140,15 +1173,21 @@ IDLE_TIMEOUT_MINUTES = 5  # Scale down after this many minutes of inactivity
 # Store last activity time
 _last_activity = {"timestamp": None, "current_pc": 0}
 
+_lambda_client_cache = None
+
 def get_lambda_client():
-    """Get Lambda client for PC management."""
+    """Get Lambda client — cached singleton."""
+    global _lambda_client_cache
+    if _lambda_client_cache is not None:
+        return _lambda_client_cache
     try:
-        return boto3.client(
+        _lambda_client_cache = boto3.client(
             "lambda",
             region_name=AWS_REGION,
             aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
             aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY")
         )
+        return _lambda_client_cache
     except Exception as e:
         logger.error(f"Failed to create Lambda client: {e}")
         return None

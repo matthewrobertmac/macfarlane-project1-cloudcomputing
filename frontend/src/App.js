@@ -282,6 +282,7 @@ function App() {
   const [calcDevice, setCalcDevice] = useState("mobile");
   const [regressionAlert, setRegressionAlert] = useState(null);
   const testRef = useRef(null);
+  const lastMetricsUpdate = useRef(0);
 
   // Heartbeat
   useEffect(() => {
@@ -433,8 +434,12 @@ function App() {
         const data = JSON.parse(e.data);
         allLatencies.push(...data.new_latencies);
         setStreamProgress((p) => ({ ...p, phase: "receiving", received: data.received, total: data.total }));
-        // Update live metrics incrementally for chart
-        setLiveMetrics([...allLatencies]);
+        // Throttle live metrics to max every 150ms (reduces re-renders during burst)
+        const now = Date.now();
+        if (now - lastMetricsUpdate.current > 150 || data.received >= data.total) {
+          setLiveMetrics([...allLatencies]);
+          lastMetricsUpdate.current = now;
+        }
       });
 
       eventSource.addEventListener("stats", (e) => {
@@ -517,15 +522,20 @@ function App() {
     setTimeout(() => setCopiedCode(null), 2000);
   };
 
-  const distributionData = testResults
+  const distributionData = useMemo(() => testResults
     ? [
         { name: "<500ms", value: testResults.distribution.fast, color: "#10b981" },
         { name: "500-1000ms", value: testResults.distribution.ok, color: "#f59e0b" },
         { name: ">1000ms", value: testResults.distribution.slow, color: "#ef4444" },
       ]
-    : [];
+    : [],
+    [testResults?.distribution?.fast, testResults?.distribution?.ok, testResults?.distribution?.slow]
+  );
 
-  const filteredHistory = historyFilter === "all" ? testHistory : testHistory.filter((r) => r.profile === historyFilter);
+  const filteredHistory = useMemo(() =>
+    historyFilter === "all" ? testHistory : testHistory.filter((r) => r.profile === historyFilter),
+    [testHistory, historyFilter]
+  );
 
   // Scoring calculator
   const calcScore = useMemo(() => {
