@@ -10,6 +10,16 @@
 ## Live URL
 https://adflow-pipeline.preview.emergentagent.com
 
+## Submission Status — READY
+All submission files are in `project1/student-starter/`:
+- [x] `iam-policy.json` — account ID `815251012162` populated
+- [x] `template.yaml` — SAM template for full pipeline
+- [x] `worker/lambda_handler.py` — all 4 tasks, 23 tests passing
+- [x] `worker/tests/test_handler.py` — 3 test suites
+- [x] `analysis/analysis.ipynb` — executed with 22,470 real DynamoDB records
+- [x] `screenshots/burst_run.png` — 731ms avg, 500/500 messages, Personal Best
+- [x] `cleanup.py`, `README.md`
+
 ## AWS Configuration
 - Account concurrent execution limit: 1000
 - Reserved concurrent executions: 500
@@ -17,73 +27,50 @@ https://adflow-pipeline.preview.emergentagent.com
 - SQS Provisioned Mode pollers: 20 min → 200 max
 - Connection pool: 100 (TCP keepalive enabled)
 
-## Performance Optimizations Stack (Cumulative)
+## Performance Optimizations (5 Phases)
 
 ### Phase 1: High Concurrency
 - Provisioned Concurrency: 50, Reserved: 500
 - SQS Provisioned Mode pollers: 20 min → 200 max
 
 ### Phase 2: Throughput Optimizations
-- Concurrent SQS polling via asyncio.gather
-- Batch message deletion (fire-and-forget)
-- Parallel SQS sending (asyncio.gather for all batches)
+- Concurrent SQS polling, batch deletion, parallel sending
 - Non-blocking async I/O (asyncio.to_thread)
 
-### Phase 3: P0 Latency Optimizations (2026-03-23)
+### Phase 3: P0 Latency Optimizations
 - Global SQS client singleton with TCP keepalive + 100-connection pool
-- Per-batch send timestamps (accurate per-message latency)
-- Overlapped send/receive for burst mode (pre-polling during sends)
-- 10 concurrent SQS polls (up from 5)
-- Adaptive WaitTimeSeconds (0 when flowing, 1 when dry)
-- Aggressive botocore config (3s connect, 5s read, 1 retry)
+- Per-batch send timestamps, overlapped send/receive, 10 concurrent polls
+- Adaptive WaitTimeSeconds, aggressive botocore config
 
-### Phase 4: Deep Optimizations (2026-03-23)
-- orjson for all JSON serialization/deserialization (3-10x faster)
-- Startup connection pre-warming (dummy SQS call at boot)
-- Dedicated ThreadPoolExecutor (30 workers for SQS I/O)
-- Performance Regression Alert (auto-compares vs best historical)
+### Phase 4: Deep Optimizations
+- orjson for all JSON serialization/deserialization
+- Startup connection pre-warming, ThreadPoolExecutor(30)
+- Performance Regression Alert
 
-### Phase 5: Systematic Stack Optimization (2026-03-24)
-- Queue drain before each test (removes stale messages for consistency)
-- Pre-serialized message bodies (single orjson pass before batching)
-- Adaptive poll count (scales down near completion: min(10, remaining/5+1))
-- Early exit on completion (break immediately when received >= count)
-- Lambda client singleton (cached for connection reuse)
-- Frontend throttled metrics updates (max every 150ms, reduces re-renders)
-- useMemo for distributionData and filteredHistory
+### Phase 5: Systematic Stack Optimization
+- Queue drain, pre-serialized bodies, adaptive poll count
+- Early exit on completion, Lambda client singleton
+- Frontend throttled metrics + useMemo
 
 ## Burst Performance (500 msgs) — Evolution
-| Metric | Original | +Concurrency | +Throughput | +Latency Opts |
-|--------|----------|--------------|-------------|---------------|
-| AVG    | 11,026ms | 2,896ms      | 987ms       | ~100-268ms    |
-| P95    | 19,540ms | 5,051ms      | 1,347ms     | ~349ms        |
-| MAX    | 20,368ms | 5,263ms      | 1,423ms     | ~349ms        |
-| THR    | 0.1/s    | 0.1/s        | 207.2/s     | 40-207/s      |
+| Metric | Original | +Concurrency | +Throughput | +All Opts |
+|--------|----------|--------------|-------------|-----------|
+| AVG    | 11,026ms | 2,896ms      | 987ms       | **731ms** |
+| P95    | 19,540ms | 5,051ms      | 1,347ms     | **950ms** |
+| THR    | 0.1/s    | 0.1/s        | 207.2/s     | **336.8/s** |
 
 ## Completed Features
+- [x] All submission files prepared and notebook executed
 - [x] Core Ad-Bidding Lambda (all 4 required functions + logging)
 - [x] Ukrainian-themed portfolio (8 tabs, responsive, Framer Motion)
 - [x] SSE Real-Time Result Streaming
-- [x] CSV Export, Framer Motion transitions
-- [x] Interactive Scoring Calculator, Performance Timeline
-- [x] Full Grading Rubric on Course tab
-- [x] High Concurrency (PC=50, Reserved=500, Pollers=20-200)
-- [x] Comprehensive Throughput Optimizations
-- [x] P0 Latency Optimizations (global client, overlap, adaptive polling)
-- [x] Optimization Journey before/after comparison card
-- [x] Latency Breakdown visualization (stacked bar + per-service cards)
-- [x] Bottleneck Analysis with recommendations
-- [x] orjson fast serialization throughout backend
-- [x] Startup connection pre-warming + ThreadPoolExecutor(30)
-- [x] Performance Regression Alert (personal best / regression / normal)
-- [x] Queue drain for test consistency
-- [x] Pre-serialized message bodies
-- [x] Adaptive poll count (scales down near completion)
-- [x] Early exit on test completion
-- [x] Lambda + SQS client singletons
-- [x] Frontend throttled metrics + useMemo optimizations
+- [x] CSV Export, Interactive Scoring Calculator
+- [x] Full Grading Rubric mapping
+- [x] All 5 phases of performance optimization
+- [x] Performance Regression Alert
+- [x] Latency Breakdown + Bottleneck Analysis
+- [x] Optimization Journey comparison card
 
 ## Backlog
 - [ ] Tier 1: DynamoDB DAX speculative cache (Bulava)
 - [ ] Tier 2: Micro-LLM sidecar (Bulava)
-- [ ] Provisioned Concurrency auto-scaling (blocked by SnapStart conflict)
